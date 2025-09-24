@@ -59,10 +59,11 @@ public class PreprocessorController {
         try {
             ProcessingResult result = textProcessingService.processText(
                 request.getText(), 
-                request.getDataSource()
+                request.getDataSource(),
+                Map.of()
             );
             
-            log.info("文本处理完成，处理耗时: {}ms", result.getProcessingTime());
+            log.info("文本处理完成，处理耗时: {}ms", result.getProcessingTimeMs());
             return ResponseEntity.ok(result);
         } catch (Exception e) {
             log.error("文本处理失败: {}", e.getMessage(), e);
@@ -70,7 +71,7 @@ public class PreprocessorController {
                 ProcessingResult.builder()
                     .success(false)
                     .errorMessage(e.getMessage())
-                    .timestamp(LocalDateTime.now())
+                    .timestamp(System.currentTimeMillis())
                     .build()
             );
         }
@@ -112,7 +113,8 @@ public class PreprocessorController {
             // 先进行分词
             ProcessingResult processingResult = textProcessingService.processText(
                 request.getText(), 
-                "feature_extraction"
+                "feature_extraction",
+                Map.of()
             );
             
             if (!processingResult.isSuccess()) {
@@ -173,7 +175,7 @@ public class PreprocessorController {
         
         Page<ProcessedText> result;
         if (dataSource != null) {
-            result = processedTextRepository.findByDataSource(dataSource, pageable);
+            result = processedTextRepository.findBySource(dataSource, pageable);
         } else if (label != null) {
             result = processedTextRepository.findByLabelsContaining(label, pageable);
         } else {
@@ -230,7 +232,7 @@ public class PreprocessorController {
                 "averageTextLength", processedTextRepository.getAverageTextLength(),
                 "averageTokenCount", processedTextRepository.getAverageTokenCount(),
                 "averageFeatureDimension", processedTextRepository.getAverageFeatureDimension(),
-                "dataSourceCounts", processedTextRepository.countByDataSource(),
+                "dataSourceCounts", processedTextRepository.countBySource(),
                 "labelCounts", processedTextRepository.countByLabels(),
                 "dataQuality", processedTextRepository.getDataQualityStatistics(),
                 "featureExtractionStats", featureExtractionService.getFeatureStatistics(),

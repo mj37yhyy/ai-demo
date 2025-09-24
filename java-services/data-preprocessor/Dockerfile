@@ -6,10 +6,9 @@ WORKDIR /app
 
 # 复制构建文件
 COPY build.gradle settings.gradle ./
-COPY gradle gradle
 
 # 下载依赖（利用Docker缓存）
-RUN gradle dependencies --no-daemon
+RUN gradle dependencies --no-daemon || true
 
 # 复制源代码
 COPY src src
@@ -18,7 +17,7 @@ COPY src src
 RUN gradle build --no-daemon -x test
 
 # 运行时镜像
-FROM openjdk:21-jre-slim
+FROM eclipse-temurin:21-jre
 
 # 安装必要的工具和中文字体
 RUN apt-get update && apt-get install -y \

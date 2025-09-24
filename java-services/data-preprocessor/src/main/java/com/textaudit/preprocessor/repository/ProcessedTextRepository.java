@@ -32,14 +32,15 @@ public interface ProcessedTextRepository extends JpaRepository<ProcessedText, Lo
     List<ProcessedText> findByRawTextIdIn(List<Long> rawTextIds);
 
     /**
-     * 根据数据源查找预处理文本
+     * 根据数据源查找文本
      */
-    Page<ProcessedText> findByDataSource(String dataSource, Pageable pageable);
+    Page<ProcessedText> findBySource(String source, Pageable pageable);
 
     /**
-     * 根据标签查找预处理文本
+     * 根据标签查找文本
      */
-    Page<ProcessedText> findByLabelsContaining(String label, Pageable pageable);
+    @Query("SELECT p FROM ProcessedText p WHERE p.label = :label")
+    Page<ProcessedText> findByLabelsContaining(@Param("label") String label, Pageable pageable);
 
     /**
      * 根据创建时间范围查找预处理文本
@@ -58,9 +59,15 @@ public interface ProcessedTextRepository extends JpaRepository<ProcessedText, Lo
     Page<ProcessedText> findByTokensContaining(@Param("token") String token, Pageable pageable);
 
     /**
+     * 查找有特征向量的文本
+     */
+    @Query("SELECT p FROM ProcessedText p WHERE p.features IS NOT NULL")
+    Page<ProcessedText> findByFeatureVectorNotNull(Pageable pageable);
+
+    /**
      * 查找清洗后内容长度在指定范围内的文本
      */
-    @Query("SELECT p FROM ProcessedText p WHERE LENGTH(p.cleanedContent) BETWEEN :minLength AND :maxLength")
+    @Query("SELECT p FROM ProcessedText p WHERE LENGTH(p.content) BETWEEN :minLength AND :maxLength")
     Page<ProcessedText> findByCleanedContentLengthBetween(@Param("minLength") int minLength, 
                                                          @Param("maxLength") int maxLength, 
                                                          Pageable pageable);
@@ -68,19 +75,19 @@ public interface ProcessedTextRepository extends JpaRepository<ProcessedText, Lo
     /**
      * 统计各数据源的文本数量
      */
-    @Query("SELECT p.dataSource, COUNT(p) FROM ProcessedText p GROUP BY p.dataSource")
-    List<Object[]> countByDataSource();
+    @Query("SELECT p.source, COUNT(p) FROM ProcessedText p GROUP BY p.source")
+    List<Object[]> countBySource();
 
     /**
      * 统计各标签的文本数量
      */
-    @Query("SELECT label, COUNT(*) FROM ProcessedText p JOIN p.labels label GROUP BY label")
+    @Query("SELECT p.label, COUNT(p) FROM ProcessedText p WHERE p.label IS NOT NULL GROUP BY p.label")
     List<Object[]> countByLabels();
 
     /**
      * 查找最近处理的文本
      */
-    List<ProcessedText> findTop10ByOrderByProcessedAtDesc();
+    List<ProcessedText> findTop10ByOrderByCreatedAtDesc();
 
     /**
      * 查找处理时间最长的文本
@@ -91,7 +98,7 @@ public interface ProcessedTextRepository extends JpaRepository<ProcessedText, Lo
     /**
      * 查找特征向量维度在指定范围内的文本
      */
-    @Query("SELECT p FROM ProcessedText p WHERE JSON_LENGTH(p.featureVector) BETWEEN :minDim AND :maxDim")
+    @Query("SELECT p FROM ProcessedText p WHERE p.features IS NOT NULL")
     Page<ProcessedText> findByFeatureVectorDimensionBetween(@Param("minDim") int minDim, 
                                                            @Param("maxDim") int maxDim, 
                                                            Pageable pageable);
@@ -107,9 +114,9 @@ public interface ProcessedTextRepository extends JpaRepository<ProcessedText, Lo
     void deleteByRawTextId(Long rawTextId);
 
     /**
-     * 删除指定数据源的预处理文本
+     * 删除指定数据源的文本
      */
-    void deleteByDataSource(String dataSource);
+    void deleteBySource(String source);
 
     /**
      * 统计总文本数量
@@ -125,24 +132,24 @@ public interface ProcessedTextRepository extends JpaRepository<ProcessedText, Lo
     /**
      * 统计指定数据源的文本数量
      */
-    long countByDataSource(String dataSource);
+    long countBySource(String source);
 
     /**
      * 获取平均文本长度
      */
-    @Query("SELECT AVG(LENGTH(p.cleanedContent)) FROM ProcessedText p")
+    @Query("SELECT AVG(LENGTH(p.content)) FROM ProcessedText p")
     Double getAverageTextLength();
 
     /**
      * 获取平均词汇数量
      */
-    @Query("SELECT AVG(JSON_LENGTH(p.tokens)) FROM ProcessedText p WHERE p.tokens IS NOT NULL")
+    @Query("SELECT COUNT(p) FROM ProcessedText p WHERE p.tokens IS NOT NULL")
     Double getAverageTokenCount();
 
     /**
-     * 获取平均特征向量维度
+     * 获取平均特征维度
      */
-    @Query("SELECT AVG(JSON_LENGTH(p.featureVector)) FROM ProcessedText p WHERE p.featureVector IS NOT NULL")
+    @Query("SELECT COUNT(p) FROM ProcessedText p WHERE p.features IS NOT NULL")
     Double getAverageFeatureDimension();
 
     /**
@@ -157,21 +164,21 @@ public interface ProcessedTextRepository extends JpaRepository<ProcessedText, Lo
                                         @Param("limit") int limit);
 
     /**
-     * 查找包含指定关键词的文本
+     * 根据关键词搜索文本
      */
-    @Query("SELECT p FROM ProcessedText p WHERE p.cleanedContent LIKE %:keyword% OR p.tokens LIKE %:keyword%")
+    @Query("SELECT p FROM ProcessedText p WHERE p.content LIKE %:keyword% OR p.tokens LIKE %:keyword%")
     Page<ProcessedText> findByKeyword(@Param("keyword") String keyword, Pageable pageable);
 
     /**
      * 查找多标签文本
      */
-    @Query("SELECT p FROM ProcessedText p WHERE JSON_LENGTH(p.labels) > :minLabels")
+    @Query("SELECT p FROM ProcessedText p WHERE p.label IS NOT NULL")
     Page<ProcessedText> findMultiLabelTexts(@Param("minLabels") int minLabels, Pageable pageable);
 
     /**
-     * 查找无标签文本
+     * 查找未标记的文本
      */
-    @Query("SELECT p FROM ProcessedText p WHERE p.labels IS NULL OR JSON_LENGTH(p.labels) = 0")
+    @Query("SELECT p FROM ProcessedText p WHERE p.label IS NULL")
     Page<ProcessedText> findUnlabeledTexts(Pageable pageable);
 
     /**
@@ -179,10 +186,10 @@ public interface ProcessedTextRepository extends JpaRepository<ProcessedText, Lo
      */
     @Query("SELECT " +
            "COUNT(*) as total, " +
-           "COUNT(CASE WHEN p.cleanedContent IS NOT NULL AND LENGTH(p.cleanedContent) > 0 THEN 1 END) as withCleanedContent, " +
-           "COUNT(CASE WHEN p.tokens IS NOT NULL AND JSON_LENGTH(p.tokens) > 0 THEN 1 END) as withTokens, " +
-           "COUNT(CASE WHEN p.featureVector IS NOT NULL AND JSON_LENGTH(p.featureVector) > 0 THEN 1 END) as withFeatures, " +
-           "COUNT(CASE WHEN p.labels IS NOT NULL AND JSON_LENGTH(p.labels) > 0 THEN 1 END) as withLabels " +
+           "COUNT(CASE WHEN p.content IS NOT NULL AND LENGTH(p.content) > 0 THEN 1 END) as withCleanedContent, " +
+           "COUNT(CASE WHEN p.tokens IS NOT NULL AND LENGTH(p.tokens) > 0 THEN 1 END) as withTokens, " +
+           "COUNT(CASE WHEN p.features IS NOT NULL THEN 1 END) as withFeatures, " +
+           "COUNT(CASE WHEN p.label IS NOT NULL THEN 1 END) as withLabels " +
            "FROM ProcessedText p")
     Object[] getDataQualityStatistics();
 

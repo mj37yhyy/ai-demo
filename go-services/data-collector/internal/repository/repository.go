@@ -139,15 +139,39 @@ func (r *MySQLRepository) CreateCollectionTask(ctx context.Context, task *model.
 }
 
 func (r *MySQLRepository) UpdateCollectionTask(ctx context.Context, task *model.CollectionTask) error {
-	return r.db.WithContext(ctx).Save(task).Error
+	// 构建更新字段映射
+	updates := map[string]interface{}{
+		"status":          task.Status,
+		"collected_count": task.CollectedCount,
+		"progress":        task.Progress,
+		"error_message":   task.ErrorMessage,
+		"start_time":      task.StartTime,
+		"end_time":        task.EndTime,
+		"updated_at":      time.Now(),
+	}
+	
+	// 只有当config不为空时才更新config字段
+	if task.Config != "" {
+		updates["config"] = task.Config
+	}
+	
+	return r.db.WithContext(ctx).Model(task).Where("id = ?", task.ID).Updates(updates).Error
 }
 
 func (r *MySQLRepository) GetCollectionTaskByID(ctx context.Context, id string) (*model.CollectionTask, error) {
+	fmt.Printf("GetCollectionTaskByID called with id: %s\n", id)
+	
 	var task model.CollectionTask
-	err := r.db.WithContext(ctx).Where("id = ?", id).First(&task).Error
+	err := r.db.WithContext(ctx).First(&task, "id = ?", id).Error
 	if err != nil {
+		fmt.Printf("GetCollectionTaskByID failed: task_id=%s, error=%s\n", id, err.Error())
 		return nil, err
 	}
+	
+	// 添加详细的调试日志
+	fmt.Printf("GetCollectionTaskByID debug info - all fields: task_id=%s, config=%s, source_type=%s, status=%s, source_url=%s, source_file_path=%s, collected_count=%d, total_count=%d, progress=%d, error_message=%s\n",
+		task.ID, task.Config, task.SourceType, task.Status, task.SourceURL, task.SourceFilePath, task.CollectedCount, task.TotalCount, task.Progress, task.ErrorMessage)
+	
 	return &task, nil
 }
 

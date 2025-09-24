@@ -1,0 +1,500 @@
+server:
+  port: 8084
+  servlet:
+    context-path: /api/trainer
+  compression:
+    enabled: true
+    mime-types: text/html,text/xml,text/plain,text/css,text/javascript,application/javascript,application/json
+    min-response-size: 1024
+  tomcat:
+    threads:
+      max: 200
+      min-spare: 10
+    max-connections: 8192
+    accept-count: 100
+    connection-timeout: 20000
+
+spring:
+  application:
+    name: model-trainer
+  profiles:
+    active: production
+  
+  # 数据库配置 - 生产环境
+  datasource:
+    url: jdbc:mysql://mysql:3306/ai_demo?useUnicode=true&characterEncoding=utf8&useSSL=false&serverTimezone=Asia/Shanghai&allowPublicKeyRetrieval=true
+    username: ai_user
+    password: ai_pass123
+    driver-class-name: com.mysql.cj.jdbc.Driver
+    hikari:
+      maximum-pool-size: 50
+      minimum-idle: 10
+      idle-timeout: 300000
+      connection-timeout: 20000
+      max-lifetime: 1200000
+      leak-detection-threshold: 60000
+      connection-test-query: SELECT 1
+  
+  # JPA配置 - 生产优化
+  jpa:
+    hibernate:
+      ddl-auto: validate
+    show-sql: false
+    properties:
+      hibernate:
+        dialect: org.hibernate.dialect.MySQL8Dialect
+        format_sql: false
+        use_sql_comments: false
+        jdbc:
+          batch_size: 100
+          order_inserts: true
+          order_updates: true
+          fetch_size: 50
+        cache:
+          use_second_level_cache: true
+          use_query_cache: true
+          region:
+            factory_class: org.hibernate.cache.jcache.JCacheRegionFactory
+        connection:
+          provider_disables_autocommit: true
+  
+  # Redis配置 - 生产环境
+  redis:
+    host: redis
+    port: 6379
+    password: redis_pass123
+    timeout: 5000ms
+    database: 2
+    lettuce:
+      pool:
+        max-active: 50
+        max-idle: 20
+        min-idle: 10
+        max-wait: 2000ms
+      shutdown-timeout: 100ms
+  
+  # Kafka配置 - 生产环境
+  kafka:
+    bootstrap-servers: kafka:9092
+    producer:
+      key-serializer: org.apache.kafka.common.serialization.StringSerializer
+      value-serializer: org.springframework.kafka.support.serializer.JsonSerializer
+      acks: all
+      retries: 5
+      batch-size: 32768
+      linger-ms: 10
+      buffer-memory: 67108864
+      compression-type: lz4
+      max-request-size: 10485760
+    consumer:
+      group-id: model-trainer-group
+      key-deserializer: org.apache.kafka.common.serialization.StringDeserializer
+      value-deserializer: org.springframework.kafka.support.serializer.JsonDeserializer
+      auto-offset-reset: earliest
+      enable-auto-commit: false
+      max-poll-records: 50
+      fetch-min-size: 1024
+      fetch-max-wait: 500ms
+      properties:
+        spring.json.trusted.packages: "com.textaudit.*"
+        max.poll.interval.ms: 600000
+        session.timeout.ms: 30000
+        heartbeat.interval.ms: 10000
+  
+  # 缓存配置
+  cache:
+    type: redis
+    redis:
+      time-to-live: 7200000
+      cache-null-values: false
+      key-prefix: "model-trainer:"
+  
+  # Jackson配置
+  jackson:
+    default-property-inclusion: non_null
+    serialization:
+      write-dates-as-timestamps: false
+      indent-output: false
+    deserialization:
+      fail-on-unknown-properties: false
+
+# gRPC配置
+grpc:
+  server:
+    port: 9084
+    enable-reflection: true
+    max-inbound-message-size: 104857600  # 100MB
+    max-inbound-metadata-size: 8192
+
+# Actuator配置
+management:
+  server:
+    port: 9084
+  endpoints:
+    web:
+      exposure:
+        include: health,info,metrics,prometheus,env,loggers
+      base-path: /actuator
+  endpoint:
+    health:
+      show-details: when-authorized
+      probes:
+        enabled: true
+  metrics:
+    export:
+      prometheus:
+        enabled: true
+        step: 30s
+    tags:
+      application: model-trainer
+      environment: production
+
+# 日志配置 - 生产环境
+logging:
+  level:
+    root: INFO
+    com.textaudit.trainer: INFO
+    org.springframework.kafka: WARN
+    org.hibernate.SQL: WARN
+    org.springframework.web: WARN
+  pattern:
+    console: "%d{yyyy-MM-dd HH:mm:ss.SSS} [%thread] %-5level [%X{traceId}] %logger{36} - %msg%n"
+    file: "%d{yyyy-MM-dd HH:mm:ss.SSS} [%thread] %-5level [%X{traceId}] %logger{36} - %msg%n"
+  file:
+    name: /app/logs/model-trainer.log
+    max-size: 500MB
+    max-history: 30
+    total-size-cap: 10GB
+
+# 自定义配置 - 生产环境
+model-training:
+  # 模型存储配置
+  storage:
+    base-path: /app/models
+    backup-path: /app/models/backup
+    temp-path: /app/models/temp
+    minio:
+      endpoint: http://minio:9000
+      access-key: minioadmin
+      secret-key: minioadmin123
+      bucket-name: model-storage
+  
+  # 训练配置 - 生产优化
+  training:
+    batch-size: 16
+    max-epochs: 50
+    early-stopping-patience: 5
+    learning-rate: 5e-5
+    validation-split: 0.15
+    test-split: 0.1
+    cross-validation-folds: 5
+    max-concurrent-jobs: 2
+    checkpoint-interval: 1000
+    gradient-accumulation-steps: 4
+  
+  # ChatGLM-6B配置
+  chatglm:
+    model-path: /app/models/chatglm-6b
+    tokenizer-path: /app/models/chatglm-6b
+    fine-tuned-path: /app/models/chatglm-6b-finetuned
+    
+    # 模型基础配置
+    model-config:
+      vocab-size: 130528
+      hidden-size: 4096
+      num-layers: 28
+      num-attention-heads: 32
+      max-sequence-length: 2048
+      pad-token-id: 3
+      eos-token-id: 2
+      
+    # 训练配置
+    training-config:
+      learning-rate: 5e-5
+      batch-size: 8
+      gradient-accumulation-steps: 4
+      max-epochs: 10
+      warmup-steps: 500
+      weight-decay: 0.01
+      lr-scheduler: cosine
+      max-grad-norm: 1.0
+      
+    # LoRA配置
+    lora-config:
+      enabled: true
+      r: 8
+      lora-alpha: 32
+      lora-dropout: 0.1
+      target-modules: ["query_key_value", "dense", "dense_h_to_4h", "dense_4h_to_h"]
+      bias: none
+      task-type: CAUSAL_LM
+      
+    # P-Tuning v2配置
+    ptuning-config:
+      enabled: false
+      pre-seq-len: 128
+      prefix-projection: false
+      prefix-hidden-size: 512
+      
+    # 量化配置
+    quantization:
+      enabled: true
+      bits: 8
+      method: int8
+      load-in-8bit: true
+      
+    # 数据配置
+    data-config:
+      max-source-length: 512
+      max-target-length: 512
+      ignore-pad-token-for-loss: true
+      preprocessing-num-workers: 8
+      
+    # 推理配置
+    inference-config:
+      max-new-tokens: 512
+      do-sample: true
+      temperature: 0.7
+      top-p: 0.9
+      repetition-penalty: 1.1
+      num-beams: 1
+  
+  # 知乎数据处理配置
+  zhihu-training:
+    # 数据源配置
+    data-source:
+      input-topic: zhihu-processed-data
+      output-topic: chatglm-training-data
+      batch-size: 1000
+      
+    # 数据格式配置
+    data-format:
+      instruction-template: "请根据以下问题生成高质量的回答："
+      input-template: "问题：{question}"
+      output-template: "回答：{answer}"
+      max-instruction-length: 256
+      max-input-length: 512
+      max-output-length: 1024
+      
+    # 数据过滤配置
+    data-filter:
+      min-answer-length: 50
+      max-answer-length: 2000
+      min-upvotes: 5
+      exclude-anonymous: false
+      quality-threshold: 0.7
+      
+    # 数据增强配置
+    data-augmentation:
+      enabled: true
+      paraphrase-ratio: 0.2
+      back-translation: false
+      synonym-replacement: 0.1
+  
+  # 深度学习配置 - 生产优化
+  deep-learning:
+    # GPU配置
+    gpu:
+      enabled: true
+      device-ids: [0]
+      memory-fraction: 0.8
+      allow-growth: true
+      
+    # 分布式训练
+    distributed:
+      enabled: false
+      backend: nccl
+      world-size: 1
+      rank: 0
+      
+    # 混合精度训练
+    mixed-precision:
+      enabled: true
+      opt-level: O1
+      
+    # LSTM配置
+    lstm:
+      hidden-size: 256
+      num-layers: 3
+      dropout: 0.2
+      bidirectional: true
+    
+    # CNN配置
+    cnn:
+      filter-sizes: [2, 3, 4, 5]
+      num-filters: 128
+      dropout: 0.3
+    
+    # Transformer配置
+    transformer:
+      d-model: 768
+      num-heads: 12
+      num-layers: 8
+      dropout: 0.1
+      max-seq-length: 1024
+  
+  # 传统机器学习配置
+  ml:
+    # 随机森林配置
+    random-forest:
+      num-trees: 200
+      max-depth: 30
+      min-samples-split: 5
+      min-samples-leaf: 2
+      max-features: sqrt
+    
+    # SVM配置
+    svm:
+      kernel: rbf
+      c: 10.0
+      gamma: scale
+      cache-size: 1000
+    
+    # 逻辑回归配置
+    logistic-regression:
+      max-iter: 2000
+      regularization: l2
+      c: 1.0
+      solver: lbfgs
+  
+  # 模型评估配置
+  evaluation:
+    metrics: [accuracy, precision, recall, f1, auc, perplexity, bleu]
+    cross-validation: true
+    bootstrap-samples: 1000
+    confidence-interval: 0.95
+    
+    # ChatGLM评估配置
+    chatglm-evaluation:
+      test-size: 0.1
+      eval-batch-size: 16
+      eval-steps: 500
+      save-steps: 1000
+      logging-steps: 100
+      evaluation-strategy: steps
+      load-best-model-at-end: true
+      metric-for-best-model: eval_loss
+      greater-is-better: false
+  
+  # 超参数调优配置
+  hyperparameter-tuning:
+    enabled: true
+    method: bayesian
+    max-trials: 20
+    objective: minimize
+    metric: validation_loss
+    
+    # 搜索空间
+    search-space:
+      learning-rate: [1e-5, 1e-4, 5e-5, 1e-3]
+      batch-size: [4, 8, 16, 32]
+      lora-r: [4, 8, 16, 32]
+      lora-alpha: [16, 32, 64]
+      warmup-steps: [100, 300, 500, 1000]
+  
+  # 监控配置
+  monitoring:
+    enabled: true
+    metrics-interval: 30
+    log-interval: 100
+    
+    # 训练监控
+    training-metrics:
+      - loss
+      - learning_rate
+      - grad_norm
+      - gpu_memory_usage
+      - training_speed
+      
+    # 系统监控
+    system-metrics:
+      - cpu_usage
+      - memory_usage
+      - disk_usage
+      - gpu_utilization
+      - network_io
+  
+  # 安全配置
+  security:
+    api-key-required: true
+    rate-limiting:
+      enabled: true
+      requests-per-minute: 100
+      burst-capacity: 20
+    
+    # 模型安全
+    model-security:
+      checksum-validation: true
+      signature-verification: false
+      encrypted-storage: false
+
+# Kafka Topics配置
+kafka:
+  topics:
+    zhihu-processed-data:
+      partitions: 6
+      replication-factor: 2
+      config:
+        retention.ms: 604800000  # 7天
+        segment.ms: 86400000     # 1天
+    chatglm-training-data:
+      partitions: 3
+      replication-factor: 2
+      config:
+        retention.ms: 1209600000  # 14天
+    model-training-events:
+      partitions: 3
+      replication-factor: 2
+      config:
+        retention.ms: 2592000000  # 30天
+    model-evaluation-results:
+      partitions: 2
+      replication-factor: 2
+      config:
+        retention.ms: 2592000000  # 30天
+
+# 熔断器配置
+resilience4j:
+  circuitbreaker:
+    instances:
+      model-training:
+        failure-rate-threshold: 50
+        wait-duration-in-open-state: 30s
+        sliding-window-size: 10
+        minimum-number-of-calls: 5
+      data-processing:
+        failure-rate-threshold: 60
+        wait-duration-in-open-state: 20s
+        sliding-window-size: 8
+        minimum-number-of-calls: 3
+  
+  retry:
+    instances:
+      model-training:
+        max-attempts: 3
+        wait-duration: 2s
+        exponential-backoff-multiplier: 2
+      data-processing:
+        max-attempts: 2
+        wait-duration: 1s
+
+# 线程池配置
+thread-pool:
+  training:
+    core-size: 4
+    max-size: 8
+    queue-capacity: 100
+    keep-alive: 60s
+    thread-name-prefix: training-
+  evaluation:
+    core-size: 2
+    max-size: 4
+    queue-capacity: 50
+    keep-alive: 60s
+    thread-name-prefix: evaluation-
+  data-processing:
+    core-size: 8
+    max-size: 16
+    queue-capacity: 200
+    keep-alive: 60s
+    thread-name-prefix: data-proc-

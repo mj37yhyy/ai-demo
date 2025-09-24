@@ -1,0 +1,406 @@
+version: '3.8'
+
+services:
+  # MySQL数据库
+  mysql:
+    image: mysql:8.0
+    container_name: ai-demo-mysql
+    restart: unless-stopped
+    environment:
+      MYSQL_ROOT_PASSWORD: root123
+      MYSQL_DATABASE: ai_demo
+      MYSQL_USER: ai_user
+      MYSQL_PASSWORD: ai_pass123
+    ports:
+      - "3306:3306"
+    volumes:
+      - mysql_data:/var/lib/mysql
+      - ./docker/mysql/init.sql:/docker-entrypoint-initdb.d/init.sql
+      - ./docker/mysql/my.cnf:/etc/mysql/conf.d/my.cnf
+    networks:
+      - ai-demo-network
+    healthcheck:
+      test: ["CMD", "mysqladmin", "ping", "-h", "localhost"]
+      timeout: 20s
+      retries: 10
+      interval: 30s
+      start_period: 60s
+
+  # Redis缓存
+  redis:
+    image: redis:7-alpine
+    container_name: ai-demo-redis
+    restart: unless-stopped
+    command: redis-server --requirepass redis_pass123 --appendonly yes
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis_data:/data
+    networks:
+      - ai-demo-network
+    healthcheck:
+      test: ["CMD", "redis-cli", "--raw", "incr", "ping"]
+      timeout: 3s
+      retries: 5
+      interval: 30s
+
+  # Kafka消息队列
+  zookeeper:
+    image: confluentinc/cp-zookeeper:7.4.0
+    container_name: ai-demo-zookeeper
+    restart: unless-stopped
+    environment:
+      ZOOKEEPER_CLIENT_PORT: 2181
+      ZOOKEEPER_TICK_TIME: 2000
+    volumes:
+      - zookeeper_data:/var/lib/zookeeper/data
+      - zookeeper_logs:/var/lib/zookeeper/log
+    networks:
+      - ai-demo-network
+
+  kafka:
+    image: confluentinc/cp-kafka:7.4.0
+    container_name: ai-demo-kafka
+    restart: unless-stopped
+    depends_on:
+      - zookeeper
+    ports:
+      - "9092:9092"
+      - "9101:9101"
+    environment:
+      KAFKA_BROKER_ID: 1
+      KAFKA_ZOOKEEPER_CONNECT: zookeeper:2181
+      KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: PLAINTEXT:PLAINTEXT,PLAINTEXT_HOST:PLAINTEXT
+      KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://kafka:29092,PLAINTEXT_HOST://localhost:9092
+      KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1
+      KAFKA_TRANSACTION_STATE_LOG_MIN_ISR: 1
+      KAFKA_TRANSACTION_STATE_LOG_REPLICATION_FACTOR: 1
+      KAFKA_GROUP_INITIAL_REBALANCE_DELAY_MS: 0
+      KAFKA_JMX_PORT: 9101
+      KAFKA_JMX_HOSTNAME: localhost
+      KAFKA_AUTO_CREATE_TOPICS_ENABLE: 'true'
+      KAFKA_DELETE_TOPIC_ENABLE: 'true'
+      KAFKA_LOG_RETENTION_HOURS: 168
+      KAFKA_LOG_SEGMENT_BYTES: 1073741824
+      KAFKA_LOG_RETENTION_BYTES: 10737418240
+    volumes:
+      - kafka_data:/var/lib/kafka/data
+    networks:
+      - ai-demo-network
+    healthcheck:
+      test: ["CMD", "kafka-broker-api-versions", "--bootstrap-server", "localhost:9092"]
+      timeout: 10s
+      retries: 5
+      interval: 30s
+      start_period: 60s
+
+  # MinIO对象存储
+  minio:
+    image: minio/minio:latest
+    container_name: ai-demo-minio
+    restart: unless-stopped
+    command: server /data --console-address ":9001"
+    ports:
+      - "9000:9000"
+      - "9001:9001"
+    environment:
+      MINIO_ROOT_USER: minioadmin
+      MINIO_ROOT_PASSWORD: minioadmin123
+    volumes:
+      - minio_data:/data
+    networks:
+      - ai-demo-network
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:9000/minio/health/live"]
+      timeout: 20s
+      retries: 3
+      interval: 30s
+
+  # 数据采集服务
+  data-collector:
+    build:
+      context: ./go-services/data-collector
+      dockerfile: Dockerfile
+    container_name: ai-demo-data-collector
+    restart: unless-stopped
+    ports:
+      - "8081:8081"
+      - "9081:9081"
+    environment:
+      - ENVIRONMENT=production
+      - CONFIG_FILE=config/production.yaml
+      - MYSQL_HOST=mysql
+      - REDIS_HOST=redis
+      - KAFKA_BROKERS=kafka:29092
+      - MINIO_ENDPOINT=minio:9000
+    volumes:
+      - ./go-services/data-collector/config:/app/config
+      - ./go-services/data-collector/logs:/app/logs
+      - collector_data:/app/data
+    depends_on:
+      mysql:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      kafka:
+        condition: service_healthy
+      minio:
+        condition: service_healthy
+    networks:
+      - ai-demo-network
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8081/health"]
+      timeout: 10s
+      retries: 3
+      interval: 30s
+      start_period: 60s
+
+  # 数据预处理服务
+  data-preprocessor:
+    build:
+      context: ./java-services/data-preprocessor
+      dockerfile: Dockerfile
+    container_name: ai-demo-data-preprocessor
+    restart: unless-stopped
+    ports:
+      - "8082:8082"
+      - "9082:9082"
+    environment:
+      - SPRING_PROFILES_ACTIVE=production
+      - MYSQL_HOST=mysql
+      - REDIS_HOST=redis
+      - KAFKA_BROKERS=kafka:29092
+      - MINIO_ENDPOINT=minio:9000
+      - JVM_OPTS=-Xms2g -Xmx4g -XX:+UseG1GC
+    volumes:
+      - ./java-services/data-preprocessor/logs:/app/logs
+      - preprocessor_data:/app/data
+    depends_on:
+      mysql:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      kafka:
+        condition: service_healthy
+      data-collector:
+        condition: service_healthy
+    networks:
+      - ai-demo-network
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8082/actuator/health"]
+      timeout: 10s
+      retries: 3
+      interval: 30s
+      start_period: 90s
+
+  # 模型训练服务
+  model-trainer:
+    build:
+      context: ./java-services/model-trainer
+      dockerfile: Dockerfile
+    container_name: ai-demo-model-trainer
+    restart: unless-stopped
+    ports:
+      - "8084:8084"
+      - "9084:9084"
+    environment:
+      - SPRING_PROFILES_ACTIVE=production
+      - MYSQL_HOST=mysql
+      - REDIS_HOST=redis
+      - KAFKA_BROKERS=kafka:29092
+      - MINIO_ENDPOINT=minio:9000
+      - CHATGLM_MODEL_PATH=/app/models/chatglm-6b
+      - TRAINING_DATA_PATH=/app/data/training
+      - FINE_TUNED_MODEL_PATH=/app/models/fine-tuned
+      - CUDA_VISIBLE_DEVICES=0
+      - JVM_OPTS=-Xms4g -Xmx8g -XX:+UseG1GC
+    volumes:
+      - ./java-services/model-trainer/logs:/app/logs
+      - trainer_data:/app/data
+      - model_storage:/app/models
+      - ./java-services/model-trainer/config:/app/config
+    depends_on:
+      mysql:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      kafka:
+        condition: service_healthy
+      data-preprocessor:
+        condition: service_healthy
+    networks:
+      - ai-demo-network
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: 1
+              capabilities: [gpu]
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8084/actuator/health"]
+      timeout: 15s
+      retries: 3
+      interval: 30s
+      start_period: 120s
+
+  # 模型推理服务
+  model-inference:
+    build:
+      context: ./go-services/model-inference
+      dockerfile: Dockerfile
+    container_name: ai-demo-model-inference
+    restart: unless-stopped
+    ports:
+      - "8083:8083"
+      - "9083:9083"
+    environment:
+      - ENVIRONMENT=production
+      - CONFIG_FILE=config/production.yaml
+      - MYSQL_HOST=mysql
+      - REDIS_HOST=redis
+      - KAFKA_BROKERS=kafka:29092
+      - MINIO_ENDPOINT=minio:9000
+      - CHATGLM_MODEL_PATH=/app/models/chatglm-6b
+      - FINE_TUNED_MODEL_PATH=/app/models/fine-tuned
+      - PRELOAD_MODELS=true
+      - CUDA_VISIBLE_DEVICES=0
+    volumes:
+      - ./go-services/model-inference/config:/app/config
+      - ./go-services/model-inference/logs:/app/logs
+      - inference_data:/app/data
+      - model_storage:/app/models:ro
+      - model_cache:/tmp/model-cache
+    depends_on:
+      mysql:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      kafka:
+        condition: service_healthy
+      model-trainer:
+        condition: service_healthy
+    networks:
+      - ai-demo-network
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: 1
+              capabilities: [gpu]
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8083/health"]
+      timeout: 15s
+      retries: 3
+      interval: 30s
+      start_period: 180s
+
+  # Prometheus监控
+  prometheus:
+    image: prom/prometheus:latest
+    container_name: ai-demo-prometheus
+    restart: unless-stopped
+    ports:
+      - "9090:9090"
+    command:
+      - '--config.file=/etc/prometheus/prometheus.yml'
+      - '--storage.tsdb.path=/prometheus'
+      - '--web.console.libraries=/etc/prometheus/console_libraries'
+      - '--web.console.templates=/etc/prometheus/consoles'
+      - '--storage.tsdb.retention.time=200h'
+      - '--web.enable-lifecycle'
+    volumes:
+      - ./monitoring/prometheus.yml:/etc/prometheus/prometheus.yml
+      - prometheus_data:/prometheus
+    networks:
+      - ai-demo-network
+    depends_on:
+      - data-collector
+      - data-preprocessor
+      - model-trainer
+      - model-inference
+
+  # Grafana可视化
+  grafana:
+    image: grafana/grafana:latest
+    container_name: ai-demo-grafana
+    restart: unless-stopped
+    ports:
+      - "3000:3000"
+    environment:
+      - GF_SECURITY_ADMIN_USER=admin
+      - GF_SECURITY_ADMIN_PASSWORD=admin123
+      - GF_USERS_ALLOW_SIGN_UP=false
+    volumes:
+      - grafana_data:/var/lib/grafana
+      - ./monitoring/grafana/datasources:/etc/grafana/provisioning/datasources
+      - ./monitoring/grafana/dashboards:/etc/grafana/provisioning/dashboards
+    networks:
+      - ai-demo-network
+    depends_on:
+      - prometheus
+
+  # Nginx反向代理
+  nginx:
+    image: nginx:alpine
+    container_name: ai-demo-nginx
+    restart: unless-stopped
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./nginx/nginx.conf:/etc/nginx/nginx.conf
+      - nginx_logs:/var/log/nginx
+    depends_on:
+      - data-collector
+      - data-preprocessor
+      - model-trainer
+      - model-inference
+      - grafana
+    networks:
+      - ai-demo-network
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost/health"]
+      timeout: 5s
+      retries: 3
+      interval: 30s
+
+volumes:
+  mysql_data:
+    driver: local
+  redis_data:
+    driver: local
+  zookeeper_data:
+    driver: local
+  zookeeper_logs:
+    driver: local
+  kafka_data:
+    driver: local
+  minio_data:
+    driver: local
+  collector_data:
+    driver: local
+  preprocessor_data:
+    driver: local
+  trainer_data:
+    driver: local
+  inference_data:
+    driver: local
+  model_storage:
+    driver: local
+  model_cache:
+    driver: local
+  prometheus_data:
+    driver: local
+  grafana_data:
+    driver: local
+  nginx_logs:
+    driver: local
+
+networks:
+  ai-demo-network:
+    driver: bridge
+    ipam:
+      config:
+        - subnet: 172.20.0.0/16

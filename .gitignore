@@ -223,6 +223,7 @@ cache/
 # 测试覆盖率报告
 coverage/
 test-results/
+test-reports/
 allure-results/
 
 # 性能测试结果

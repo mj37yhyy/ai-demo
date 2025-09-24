@@ -29,8 +29,8 @@ type CollectionTask struct {
 	CollectedCount int       `gorm:"default:0" json:"collected_count"`
 	TotalCount     int       `gorm:"default:0" json:"total_count"`
 	Progress       int       `gorm:"default:0" json:"progress"`
-	StartTime      time.Time `gorm:"type:timestamp null" json:"start_time"`
-	EndTime        time.Time `gorm:"type:timestamp null" json:"end_time"`
+	StartTime      *time.Time `gorm:"type:timestamp null;default:null" json:"start_time"`
+	EndTime        *time.Time `gorm:"type:timestamp null;default:null" json:"end_time"`
 	ErrorMessage   string    `gorm:"type:text" json:"error_message"`
 	CreatedAt      time.Time `gorm:"autoCreateTime" json:"created_at"`
 	UpdatedAt      time.Time `gorm:"autoUpdateTime" json:"updated_at"`
@@ -104,8 +104,8 @@ type TrainingTask struct {
 	Config       string    `gorm:"type:json;not null" json:"config"`
 	Status       string    `gorm:"type:varchar(20);default:'pending';index" json:"status"`
 	Metrics      string    `gorm:"type:json" json:"metrics"`
-	StartTime    time.Time `gorm:"type:timestamp null" json:"start_time"`
-	EndTime      time.Time `gorm:"type:timestamp null" json:"end_time"`
+	StartTime    *time.Time `gorm:"type:timestamp null;default:null" json:"start_time"`
+	EndTime      *time.Time `gorm:"type:timestamp null;default:null" json:"end_time"`
 	ErrorMessage string    `gorm:"type:text" json:"error_message"`
 	CreatedAt    time.Time `gorm:"autoCreateTime" json:"created_at"`
 	UpdatedAt    time.Time `gorm:"autoUpdateTime" json:"updated_at"`

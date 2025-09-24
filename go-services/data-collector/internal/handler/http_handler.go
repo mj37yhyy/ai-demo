@@ -149,13 +149,22 @@ func (h *HTTPHandler) CollectText(c *gin.Context) {
 	if req.Config != nil {
 		pbConfig.MaxCount = req.Config.MaxTexts
 		pbConfig.ConcurrentLimit = req.Config.Concurrent
-		pbConfig.RateLimit = req.Config.Timeout
+		// 修复：这里应该是一个固定值或者从其他地方获取，而不是Timeout
+		pbConfig.RateLimit = 100 // 默认速率限制
 		if req.Config.Filters != nil {
-			for _, filter := range req.Config.Filters {
-				pbConfig.Filters = append(pbConfig.Filters, filter)
+			for filterName, enabled := range req.Config.Filters {
+				if enabled == "true" {
+					pbConfig.Filters = append(pbConfig.Filters, filterName)
+				}
 			}
 		}
 	}
+	
+	// 添加调试日志
+	h.logger.WithFields(logrus.Fields{
+		"req_config": req.Config,
+		"pb_config": pbConfig,
+	}).Info("HTTP handler config conversion debug")
 
 	// 调用服务
 	pbReq := &pb.CollectRequest{
@@ -271,8 +280,8 @@ func (h *HTTPHandler) ListTasks(c *gin.Context) {
 			Progress:       task.Progress,
 			CollectedCount: task.CollectedCount,
 			TotalCount:     task.TotalCount,
-			StartTime:      task.StartTime.Format(time.RFC3339),
-			EndTime:        task.EndTime.Format(time.RFC3339),
+			StartTime:      func() string { if task.StartTime != nil { return task.StartTime.Format(time.RFC3339) } else { return "" } }(),
+			EndTime:        func() string { if task.EndTime != nil { return task.EndTime.Format(time.RFC3339) } else { return "" } }(),
 			ErrorMessage:   task.ErrorMessage,
 		}
 	}
@@ -312,6 +321,15 @@ func (h *HTTPHandler) GetMetrics(c *gin.Context) {
 
 // SetupRoutes 设置路由
 func (h *HTTPHandler) SetupRoutes(r *gin.Engine) {
+	// 中间件
+	r.Use(h.requestIDMiddleware())
+	r.Use(h.loggingMiddleware())
+	r.Use(h.corsMiddleware())
+
+	// 健康检查和指标
+	r.GET("/health", h.HealthCheck)
+	r.GET("/metrics", h.GetMetrics)
+
 	// API路由组
 	api := r.Group("/api/v1")
 	{
@@ -319,15 +337,6 @@ func (h *HTTPHandler) SetupRoutes(r *gin.Engine) {
 		api.GET("/status/:taskId", h.GetTaskStatus)
 		api.GET("/tasks", h.ListTasks)
 	}
-
-	// 健康检查和指标
-	r.GET("/health", h.HealthCheck)
-	r.GET("/metrics", h.GetMetrics)
-
-	// 中间件
-	r.Use(h.requestIDMiddleware())
-	r.Use(h.loggingMiddleware())
-	r.Use(h.corsMiddleware())
 }
 
 // requestIDMiddleware 请求ID中间件

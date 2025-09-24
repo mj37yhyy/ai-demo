@@ -112,7 +112,7 @@ public class TextProcessingService {
 
             // 4. 特征提取
             TextFeatures features = featureExtractionService.extractFeatures(
-                cleanedText, tokenizationResult.getTokens());
+                cleanedText, tokenizationResult);
 
             // 5. 构建处理结果
             ProcessingResult result = ProcessingResult.builder()
@@ -216,7 +216,7 @@ public class TextProcessingService {
             
             // 提取词语
             List<String> tokens = terms.stream()
-                .map(Term::word)
+                .map(term -> term.word)
                 .filter(word -> word.length() >= minWordLength && word.length() <= maxWordLength)
                 .collect(Collectors.toList());
 
@@ -228,7 +228,7 @@ public class TextProcessingService {
             // 词性标注
             Map<String, String> posTagging = terms.stream()
                 .collect(Collectors.toMap(
-                    Term::word,
+                    term -> term.word,
                     term -> term.nature.toString(),
                     (existing, replacement) -> existing
                 ));

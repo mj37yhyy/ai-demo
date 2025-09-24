@@ -103,7 +103,7 @@ public class RawTextConsumer {
                 sendProcessedTextMessage(processedText);
                 
                 log.info("文本处理完成，ID: {}, 处理耗时: {}ms", 
-                        rawTextMessage.getId(), result.getProcessingTime());
+                        rawTextMessage.getId(), result.getProcessingTimeMs());
             } else {
                 // 处理失败，发送错误消息
                 sendErrorMessage(rawTextMessage, result.getErrorMessage());
@@ -186,7 +186,8 @@ public class RawTextConsumer {
             // 文本预处理
             ProcessingResult result = textProcessingService.processText(
                 rawTextMessage.getContent(), 
-                rawTextMessage.getDataSource()
+                rawTextMessage.getDataSource(),
+                rawTextMessage.getMetadata()
             );
 
             if (!result.isSuccess()) {
@@ -214,8 +215,8 @@ public class RawTextConsumer {
                 .success(false)
                 .errorMessage(e.getMessage())
                 .originalText(rawTextMessage.getContent())
-                .dataSource(rawTextMessage.getDataSource())
-                .timestamp(LocalDateTime.now())
+                .source(rawTextMessage.getDataSource())
+                .timestamp(System.currentTimeMillis())
                 .build();
         }
     }
@@ -265,16 +266,15 @@ public class RawTextConsumer {
 
         try {
             ProcessedText processedText = ProcessedText.builder()
-                .rawTextId(rawTextMessage.getId())
-                .cleanedContent(result.getCleanedText())
+                .rawTextId(rawTextMessage.getId().toString())
+                .content(result.getCleanedText())
                 .tokens(objectMapper.writeValueAsString(result.getTokenizationResult()))
-                .featureVector(result.getFeatures() != null ? 
+                .features(result.getFeatures() != null ? 
                     objectMapper.writeValueAsString(result.getFeatures()) : null)
-                .labels(rawTextMessage.getLabels() != null ? 
-                    objectMapper.writeValueAsString(rawTextMessage.getLabels()) : null)
-                .dataSource(result.getDataSource())
+                .label(rawTextMessage.getLabels() != null && !rawTextMessage.getLabels().isEmpty() ? 1 : 0)
+                .source(result.getSource())
                 .processingMetadata(createProcessingMetadata(result))
-                .processedAt(LocalDateTime.now())
+                .timestamp(System.currentTimeMillis())
                 .build();
 
             return processedTextRepository.save(processedText);
@@ -291,14 +291,14 @@ public class RawTextConsumer {
     private String createProcessingMetadata(ProcessingResult result) {
         try {
             Map<String, Object> metadata = Map.of(
-                "processingTime", result.getProcessingTime(),
+                "processingTime", result.getProcessingTimeMs(),
                 "originalLength", result.getOriginalText() != null ? result.getOriginalText().length() : 0,
                 "cleanedLength", result.getCleanedText() != null ? result.getCleanedText().length() : 0,
                 "tokenCount", result.getTokenizationResult() != null ? 
                     result.getTokenizationResult().getTotalTokenCount() : 0,
                 "featureDimension", result.getFeatures() != null ? 
                     result.getFeatures().getFeatureDimension() : 0,
-                "reductionRatio", result.getReductionRatio(),
+                "reductionRatio", calculateReductionRatio(result),
                 "processedAt", LocalDateTime.now().toString()
             );
             
@@ -307,6 +307,15 @@ public class RawTextConsumer {
             log.warn("创建处理元数据失败: {}", e.getMessage());
             return "{}";
         }
+    }
+    
+    private double calculateReductionRatio(ProcessingResult result) {
+        if (result.getOriginalText() == null || result.getCleanedText() == null) {
+            return 0.0;
+        }
+        int originalLength = result.getOriginalText().length();
+        int cleanedLength = result.getCleanedText().length();
+        return originalLength > 0 ? (double) (originalLength - cleanedLength) / originalLength : 0.0;
     }
 
     /**
@@ -317,13 +326,13 @@ public class RawTextConsumer {
             ProcessedTextMessage message = ProcessedTextMessage.builder()
                 .id(processedText.getId())
                 .rawTextId(processedText.getRawTextId())
-                .dataSource(processedText.getDataSource())
+                .dataSource(processedText.getSource())
                 .tokenCount(extractTokenCount(processedText.getTokens()))
-                .featureDimension(extractFeatureDimension(processedText.getFeatureVector()))
-                .processedAt(processedText.getProcessedAt())
+                .featureDimension(extractFeatureDimension(processedText.getFeatures()))
+                .processedAt(LocalDateTime.ofEpochSecond(processedText.getTimestamp() / 1000, 0, java.time.ZoneOffset.UTC))
                 .build();
 
-            kafkaTemplate.send(processedTextTopic, processedText.getRawTextId().toString(), message);
+            kafkaTemplate.send(processedTextTopic, processedText.getRawTextId(), message);
             log.debug("发送处理完成消息，ID: {}", processedText.getId());
 
         } catch (Exception e) {
@@ -411,8 +420,8 @@ public class RawTextConsumer {
      * 处理完成消息
      */
     public static class ProcessedTextMessage {
-        private Long id;
-        private Long rawTextId;
+        private String id;
+        private String rawTextId;
         private String dataSource;
         private int tokenCount;
         private int featureDimension;
@@ -423,10 +432,10 @@ public class RawTextConsumer {
         }
 
         // getters and setters
-        public Long getId() { return id; }
-        public void setId(Long id) { this.id = id; }
-        public Long getRawTextId() { return rawTextId; }
-        public void setRawTextId(Long rawTextId) { this.rawTextId = rawTextId; }
+        public String getId() { return id; }
+        public void setId(String id) { this.id = id; }
+        public String getRawTextId() { return rawTextId; }
+        public void setRawTextId(String rawTextId) { this.rawTextId = rawTextId; }
         public String getDataSource() { return dataSource; }
         public void setDataSource(String dataSource) { this.dataSource = dataSource; }
         public int getTokenCount() { return tokenCount; }
@@ -437,15 +446,15 @@ public class RawTextConsumer {
         public void setProcessedAt(LocalDateTime processedAt) { this.processedAt = processedAt; }
 
         public static class ProcessedTextMessageBuilder {
-            private Long id;
-            private Long rawTextId;
+            private String id;
+            private String rawTextId;
             private String dataSource;
             private int tokenCount;
             private int featureDimension;
             private LocalDateTime processedAt;
 
-            public ProcessedTextMessageBuilder id(Long id) { this.id = id; return this; }
-            public ProcessedTextMessageBuilder rawTextId(Long rawTextId) { this.rawTextId = rawTextId; return this; }
+            public ProcessedTextMessageBuilder id(String id) { this.id = id; return this; }
+            public ProcessedTextMessageBuilder rawTextId(String rawTextId) { this.rawTextId = rawTextId; return this; }
             public ProcessedTextMessageBuilder dataSource(String dataSource) { this.dataSource = dataSource; return this; }
             public ProcessedTextMessageBuilder tokenCount(int tokenCount) { this.tokenCount = tokenCount; return this; }
             public ProcessedTextMessageBuilder featureDimension(int featureDimension) { this.featureDimension = featureDimension; return this; }

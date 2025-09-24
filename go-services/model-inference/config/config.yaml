@@ -1,7 +1,7 @@
 # 服务器配置
 server:
   host: "0.0.0.0"
-  port: 8083
+  port: 8080
   mode: "debug"  # debug, release, test
   read_timeout: 30
   write_timeout: 30
@@ -9,10 +9,10 @@ server:
 
 # 数据库配置
 database:
-  host: "localhost"
+  host: "text-audit-mysql"
   port: 3306
   user: "root"
-  password: "password"
+  password: "root123"
   dbname: "text_audit"
   charset: "utf8mb4"
   parse_time: true
@@ -23,7 +23,7 @@ database:
 
 # Redis配置
 redis:
-  host: "localhost"
+  host: "text-audit-redis"
   port: 6379
   password: ""
   db: 0

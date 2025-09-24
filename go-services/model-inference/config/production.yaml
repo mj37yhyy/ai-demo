@@ -1,0 +1,393 @@
+# 生产环境配置 - 模型推理服务
+# 服务器配置
+server:
+  host: "0.0.0.0"
+  port: 8083
+  mode: "release"  # 生产模式
+  read_timeout: 60
+  write_timeout: 60
+  idle_timeout: 120
+  max_header_bytes: 1048576  # 1MB
+  shutdown_timeout: 30
+
+# 数据库配置 - 生产环境
+database:
+  host: "mysql"
+  port: 3306
+  user: "ai_user"
+  password: "ai_pass123"
+  dbname: "ai_demo"
+  charset: "utf8mb4"
+  parse_time: true
+  loc: "Asia/Shanghai"
+  max_idle_conns: 20
+  max_open_conns: 200
+  conn_max_lifetime: 7200
+  conn_max_idle_time: 1800
+  
+  # 连接池配置
+  pool:
+    max_lifetime: 7200
+    max_idle_time: 1800
+    health_check_period: 60
+
+# Redis配置 - 生产环境
+redis:
+  host: "redis"
+  port: 6379
+  password: "redis_pass123"
+  db: 3
+  pool_size: 50
+  min_idle_conns: 10
+  dial_timeout: 10
+  read_timeout: 5
+  write_timeout: 5
+  pool_timeout: 8
+  idle_timeout: 600
+  
+  # 集群配置（如果使用Redis集群）
+  cluster:
+    enabled: false
+    addrs: []
+    
+  # 哨兵配置（如果使用Redis哨兵）
+  sentinel:
+    enabled: false
+    master_name: ""
+    addrs: []
+
+# 模型配置 - 生产环境
+model:
+  base_path: "/app/models"
+  max_loaded_models: 10
+  load_timeout: 600
+  cache_ttl: 7200
+  
+  # ChatGLM-6B配置
+  chatglm:
+    model_path: "/app/models/chatglm-6b"
+    fine_tuned_path: "/app/models/chatglm-6b-finetuned"
+    tokenizer_path: "/app/models/chatglm-6b"
+    
+    # 模型参数
+    model_config:
+      max_length: 2048
+      temperature: 0.7
+      top_p: 0.9
+      top_k: 50
+      repetition_penalty: 1.1
+      do_sample: true
+      num_beams: 1
+      
+    # 量化配置
+    quantization:
+      enabled: true
+      bits: 8
+      load_in_8bit: true
+      
+    # GPU配置
+    gpu:
+      enabled: true
+      device_id: 0
+      memory_fraction: 0.8
+      
+    # 批处理配置
+    batch:
+      max_batch_size: 16
+      max_wait_time: 100  # ms
+      
+  # 传统模型配置
+  traditional:
+    # 文本分类模型
+    text_classifier:
+      model_path: "/app/models/text_classifier.pkl"
+      vectorizer_path: "/app/models/tfidf_vectorizer.pkl"
+      
+    # 情感分析模型
+    sentiment_analyzer:
+      model_path: "/app/models/sentiment_model.pkl"
+      
+    # 特征提取模型
+    feature_extractor:
+      model_path: "/app/models/feature_extractor.pkl"
+
+# 推理配置 - 生产优化
+inference:
+  max_batch_size: 32
+  timeout_seconds: 120
+  max_concurrency: 100
+  result_cache_ttl: 1800
+  history_retention: 2592000  # 30天
+  
+  # 队列配置
+  queue:
+    max_size: 1000
+    worker_count: 20
+    batch_timeout: 50  # ms
+    
+  # 限流配置
+  rate_limit:
+    enabled: true
+    requests_per_second: 100
+    burst_size: 200
+    
+  # 熔断器配置
+  circuit_breaker:
+    enabled: true
+    failure_threshold: 10
+    recovery_timeout: 30
+    half_open_max_requests: 5
+    
+  # 重试配置
+  retry:
+    max_attempts: 3
+    initial_interval: 1000  # ms
+    max_interval: 10000     # ms
+    multiplier: 2.0
+
+# Kafka配置 - 消息队列
+kafka:
+  brokers: ["kafka:9092"]
+  
+  # 生产者配置
+  producer:
+    client_id: "model-inference-producer"
+    acks: "all"
+    retries: 5
+    batch_size: 32768
+    linger_ms: 10
+    buffer_memory: 67108864
+    compression_type: "lz4"
+    
+  # 消费者配置
+  consumer:
+    group_id: "model-inference-group"
+    auto_offset_reset: "earliest"
+    enable_auto_commit: false
+    max_poll_records: 100
+    session_timeout_ms: 30000
+    heartbeat_interval_ms: 10000
+    
+  # 主题配置
+  topics:
+    inference_requests: "inference-requests"
+    inference_results: "inference-results"
+    model_events: "model-events"
+    chatglm_requests: "chatglm-requests"
+    chatglm_responses: "chatglm-responses"
+
+# MinIO配置 - 对象存储
+minio:
+  endpoint: "minio:9000"
+  access_key: "minioadmin"
+  secret_key: "minioadmin123"
+  use_ssl: false
+  
+  # 存储桶配置
+  buckets:
+    models: "model-storage"
+    inference_data: "inference-data"
+    logs: "inference-logs"
+
+# 监控配置
+monitoring:
+  # Prometheus配置
+  prometheus:
+    enabled: true
+    path: "/metrics"
+    port: 9083
+    
+  # 健康检查配置
+  health:
+    enabled: true
+    path: "/health"
+    interval: 30
+    timeout: 10
+    
+  # 就绪检查配置
+  readiness:
+    enabled: true
+    path: "/ready"
+    
+  # 指标配置
+  metrics:
+    - name: "inference_requests_total"
+      type: "counter"
+      help: "Total number of inference requests"
+    - name: "inference_duration_seconds"
+      type: "histogram"
+      help: "Inference request duration"
+    - name: "model_load_duration_seconds"
+      type: "histogram"
+      help: "Model loading duration"
+    - name: "active_models"
+      type: "gauge"
+      help: "Number of active models"
+
+# 日志配置 - 生产环境
+logging:
+  level: "info"
+  format: "json"
+  output: "file"
+  file_path: "/app/logs/model-inference.log"
+  max_size: 500  # MB
+  max_backups: 10
+  max_age: 30    # days
+  compress: true
+  
+  # 结构化日志字段
+  fields:
+    service: "model-inference"
+    version: "1.0.0"
+    environment: "production"
+    
+  # 日志级别配置
+  loggers:
+    gin: "warn"
+    gorm: "warn"
+    redis: "warn"
+    kafka: "info"
+
+# 安全配置
+security:
+  # API密钥认证
+  api_key:
+    enabled: true
+    header_name: "X-API-Key"
+    
+  # JWT认证
+  jwt:
+    enabled: false
+    secret: ""
+    expiration: 3600
+    
+  # CORS配置
+  cors:
+    enabled: true
+    allowed_origins: ["*"]
+    allowed_methods: ["GET", "POST", "PUT", "DELETE", "OPTIONS"]
+    allowed_headers: ["*"]
+    max_age: 86400
+    
+  # 限流配置
+  rate_limiting:
+    enabled: true
+    requests_per_minute: 1000
+    burst_capacity: 100
+    
+  # TLS配置
+  tls:
+    enabled: false
+    cert_file: ""
+    key_file: ""
+
+# 性能配置
+performance:
+  # 连接池配置
+  connection_pool:
+    max_idle_conns: 100
+    max_open_conns: 1000
+    conn_max_lifetime: 3600
+    
+  # 缓存配置
+  cache:
+    # 模型缓存
+    model_cache:
+      size: 1000
+      ttl: 7200
+      
+    # 结果缓存
+    result_cache:
+      size: 10000
+      ttl: 1800
+      
+    # 特征缓存
+    feature_cache:
+      size: 5000
+      ttl: 3600
+      
+  # 内存配置
+  memory:
+    max_heap_size: "8g"
+    gc_target_percentage: 80
+    
+  # 并发配置
+  concurrency:
+    max_goroutines: 10000
+    worker_pool_size: 100
+
+# 数据配置
+data:
+  # 输入验证
+  validation:
+    max_text_length: 10000
+    min_text_length: 1
+    allowed_languages: ["zh", "en"]
+    
+  # 数据预处理
+  preprocessing:
+    normalize_text: true
+    remove_html: true
+    remove_urls: true
+    remove_emails: true
+    
+  # 数据存储
+  storage:
+    # 请求数据保留期
+    request_retention_days: 30
+    # 结果数据保留期
+    result_retention_days: 90
+    # 日志数据保留期
+    log_retention_days: 30
+
+# 集成配置
+integrations:
+  # 数据处理服务
+  data_processor:
+    endpoint: "http://data-preprocessor:8082"
+    timeout: 30
+    retry_attempts: 3
+    
+  # 模型训练服务
+  model_trainer:
+    endpoint: "http://model-trainer:8084"
+    timeout: 60
+    retry_attempts: 2
+    
+  # 数据采集服务
+  data_collector:
+    endpoint: "http://data-collector:8081"
+    timeout: 30
+    retry_attempts: 3
+
+# 部署配置
+deployment:
+  # 容器配置
+  container:
+    memory_limit: "8Gi"
+    cpu_limit: "4"
+    memory_request: "4Gi"
+    cpu_request: "2"
+    
+  # 副本配置
+  replicas:
+    min: 2
+    max: 10
+    target_cpu_utilization: 70
+    
+  # 存储配置
+  storage:
+    model_volume_size: "50Gi"
+    log_volume_size: "20Gi"
+    data_volume_size: "100Gi"
+
+# 特性开关
+feature_flags:
+  chatglm_inference: true
+  batch_processing: true
+  async_processing: true
+  model_caching: true
+  result_caching: true
+  metrics_collection: true
+  distributed_tracing: false
+  a_b_testing: false

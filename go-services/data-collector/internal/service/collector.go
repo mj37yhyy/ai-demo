@@ -97,6 +97,8 @@ func NewCollectorService(cfg *config.Config) (*CollectorService, error) {
 func (s *CollectorService) CollectText(ctx context.Context, req *pb.CollectRequest) (*pb.CollectResponse, error) {
 	taskID := uuid.New().String()
 	
+	logrus.Info("CollectText method called - DEBUG TEST")
+	
 	logrus.WithFields(logrus.Fields{
 		"task_id":     taskID,
 		"source_type": req.Source.Type,
@@ -123,18 +125,30 @@ func (s *CollectorService) CollectText(ctx context.Context, req *pb.CollectReque
 		SourceURL:  req.Source.Url,
 		SourceFilePath: req.Source.FilePath,
 		Status:     pb.CollectionStatus_COLLECTION_PENDING.String(),
+		StartTime:  nil, // 明确设置为nil，任务开始时会被设置
+		EndTime:    nil, // 明确设置为nil，任务结束时会被设置
 	}
 	
-	configBytes, _ := json.Marshal(req.Config)
+	// 序列化配置，添加调试日志
+	configBytes, err := json.Marshal(req.Config)
+	if err != nil {
+		logrus.WithError(err).Error("Failed to marshal config")
+	}
 	dbTask.Config = string(configBytes)
+	
+	logrus.WithFields(logrus.Fields{
+		"task_id": taskID,
+		"config_bytes": string(configBytes),
+		"config_object": req.Config,
+	}).Info("Config serialization debug")
 	
 	if err := s.repo.CreateCollectionTask(ctx, dbTask); err != nil {
 		logrus.WithError(err).Error("Failed to save collection task")
 		return nil, fmt.Errorf("failed to save collection task: %w", err)
 	}
 
-	// 异步执行采集任务
-	go s.executeCollectionTask(ctx, task, req)
+	// 异步执行采集任务 - 使用background context避免HTTP请求结束时任务被取消
+	go s.executeCollectionTask(context.Background(), task, req)
 
 	return &pb.CollectResponse{
 		TaskId:         taskID,
@@ -164,8 +178,8 @@ func (s *CollectorService) GetCollectionStatus(ctx context.Context, req *pb.Stat
 			Status:    parseCollectionStatus(dbTask.Status),
 			Progress:  int32(dbTask.Progress),
 			Message:   dbTask.ErrorMessage,
-			StartTime: dbTask.StartTime.Unix(),
-			EndTime:   dbTask.EndTime.Unix(),
+			StartTime: func() int64 { if dbTask.StartTime != nil { return dbTask.StartTime.Unix() } else { return 0 } }(),
+			EndTime:   func() int64 { if dbTask.EndTime != nil { return dbTask.EndTime.Unix() } else { return 0 } }(),
 		}, nil
 	}
 
@@ -187,15 +201,25 @@ func (s *CollectorService) GetCollectionStatus(ctx context.Context, req *pb.Stat
 }
 
 func (s *CollectorService) executeCollectionTask(ctx context.Context, task *CollectionTask, req *pb.CollectRequest) {
+	logrus.WithField("task_id", task.ID).Info("executeCollectionTask started")
+	
 	// 创建可取消的上下文
 	taskCtx, cancel := context.WithCancel(ctx)
 	task.cancelFunc = cancel
 	defer cancel()
 
+	logrus.WithField("task_id", task.ID).Info("Context created")
+
 	// 更新任务状态为运行中
 	now := time.Now()
 	task.StartTime = &now
 	task.Status = pb.CollectionStatus_COLLECTION_RUNNING
+	
+	logrus.WithFields(logrus.Fields{
+		"task_id": task.ID,
+		"config": task.Config,
+	}).Info("About to call updateTaskInDB")
+	
 	s.updateTaskInDB(task)
 
 	logrus.WithField("task_id", task.ID).Info("Collection task started")
@@ -313,6 +337,16 @@ func (s *CollectorService) handleTaskError(task *CollectionTask, err error) {
 	task.Status = pb.CollectionStatus_COLLECTION_FAILED
 	task.ErrorMessage = err.Error()
 
+	// 确保Config字段不为空，如果为空则从数据库获取原始配置
+	if task.Config == nil {
+		if dbTask, dbErr := s.repo.GetCollectionTaskByID(context.Background(), task.ID); dbErr == nil && dbTask.Config != "" {
+			var config pb.CollectionConfig
+			if json.Unmarshal([]byte(dbTask.Config), &config) == nil {
+				task.Config = &config
+			}
+		}
+	}
+
 	s.updateTaskInDB(task)
 	
 	logrus.WithFields(logrus.Fields{
@@ -322,21 +356,59 @@ func (s *CollectorService) handleTaskError(task *CollectionTask, err error) {
 }
 
 func (s *CollectorService) updateTaskInDB(task *CollectionTask) {
-	dbTask := &model.CollectionTask{
-		ID:             task.ID,
-		Status:         task.Status.String(),
-		CollectedCount: int(task.CollectedCount),
-		Progress:       int(task.Progress),
-		ErrorMessage:   task.ErrorMessage,
+	logrus.WithField("task_id", task.ID).Info("updateTaskInDB called")
+	
+	// 先从数据库获取原始任务信息，避免覆盖其他字段
+	dbTask, err := s.repo.GetCollectionTaskByID(context.Background(), task.ID)
+	if err != nil {
+		logrus.WithError(err).Error("Failed to get task from database for update")
+		return
+	}
+	
+	// 添加调试日志
+	logrus.WithFields(logrus.Fields{
+		"task_id": task.ID,
+		"task_config": task.Config,
+		"db_config": dbTask.Config,
+	}).Info("updateTaskInDB debug info")
+	
+	// 只更新需要更新的字段
+	dbTask.Status = task.Status.String()
+	dbTask.CollectedCount = int(task.CollectedCount)
+	dbTask.Progress = int(task.Progress)
+	dbTask.ErrorMessage = task.ErrorMessage
+	
+	// 序列化配置 - 只有当task.Config不为nil时才更新config字段
+	if task.Config != nil {
+		configBytes, err := json.Marshal(task.Config)
+		if err != nil {
+			logrus.WithError(err).Error("Failed to marshal config")
+		} else {
+			dbTask.Config = string(configBytes)
+			logrus.WithFields(logrus.Fields{
+				"task_id": task.ID,
+				"config_bytes": string(configBytes),
+			}).Info("Config serialized successfully")
+		}
+	} else {
+		logrus.WithFields(logrus.Fields{
+			"task_id": task.ID,
+			"original_config": dbTask.Config,
+		}).Info("task.Config is nil, keeping original config")
 	}
 	
 	if task.StartTime != nil {
-		dbTask.StartTime = *task.StartTime
+		dbTask.StartTime = task.StartTime
 	}
 	if task.EndTime != nil {
-		dbTask.EndTime = *task.EndTime
+		dbTask.EndTime = task.EndTime
 	}
 
+	logrus.WithFields(logrus.Fields{
+		"task_id": dbTask.ID,
+		"config": dbTask.Config,
+	}).Info("About to update task in DB")
+	
 	if err := s.repo.UpdateCollectionTask(context.Background(), dbTask); err != nil {
 		logrus.WithError(err).Error("Failed to update task in database")
 	}

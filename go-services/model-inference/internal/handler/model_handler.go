@@ -88,13 +88,13 @@ func (h *ModelHandler) LoadModel(c *gin.Context) {
 // @Tags 模型管理
 // @Accept json
 // @Produce json
-// @Param model_name path string true "模型名称"
+// @Param name path string true "模型名称"
 // @Success 200 {object} model.ModelStatusResponse
 // @Failure 400 {object} model.ErrorResponse
 // @Failure 500 {object} model.ErrorResponse
-// @Router /api/v1/models/{model_name}/unload [post]
+// @Router /api/v1/models/{name}/unload [post]
 func (h *ModelHandler) UnloadModel(c *gin.Context) {
-	modelName := c.Param("model_name")
+	modelName := c.Param("name")
 	if modelName == "" {
 		c.JSON(http.StatusBadRequest, model.ErrorResponse{
 			Error:   "无效的请求参数",
@@ -126,14 +126,14 @@ func (h *ModelHandler) UnloadModel(c *gin.Context) {
 // @Tags 模型管理
 // @Accept json
 // @Produce json
-// @Param model_name path string true "模型名称"
+// @Param name path string true "模型名称"
 // @Success 200 {object} model.Model
 // @Failure 400 {object} model.ErrorResponse
 // @Failure 404 {object} model.ErrorResponse
 // @Failure 500 {object} model.ErrorResponse
-// @Router /api/v1/models/{model_name} [get]
+// @Router /api/v1/models/{name} [get]
 func (h *ModelHandler) GetModel(c *gin.Context) {
-	modelName := c.Param("model_name")
+	modelName := c.Param("name")
 	if modelName == "" {
 		c.JSON(http.StatusBadRequest, model.ErrorResponse{
 			Error:   "无效的请求参数",
@@ -184,8 +184,11 @@ func (h *ModelHandler) ListModels(c *gin.Context) {
 		limit = 10
 	}
 
+	// 计算偏移量
+	offset := (page - 1) * limit
+	
 	// 获取模型列表
-	models, err := h.modelService.ListModels(c.Request.Context(), page, limit)
+	models, err := h.modelService.ListModels(c.Request.Context(), limit, offset)
 	if err != nil {
 		h.logger.WithError(err).Error("获取模型列表失败")
 		c.JSON(http.StatusInternalServerError, model.ErrorResponse{
@@ -216,14 +219,14 @@ func (h *ModelHandler) ListModels(c *gin.Context) {
 // @Tags 模型管理
 // @Accept json
 // @Produce json
-// @Param model_name path string true "模型名称"
+// @Param name path string true "模型名称"
 // @Success 200 {object} model.ModelStatusResponse
 // @Failure 400 {object} model.ErrorResponse
 // @Failure 404 {object} model.ErrorResponse
 // @Failure 500 {object} model.ErrorResponse
-// @Router /api/v1/models/{model_name}/status [get]
+// @Router /api/v1/models/{name}/status [get]
 func (h *ModelHandler) GetModelStatus(c *gin.Context) {
-	modelName := c.Param("model_name")
+	modelName := c.Param("name")
 	if modelName == "" {
 		c.JSON(http.StatusBadRequest, model.ErrorResponse{
 			Error:   "无效的请求参数",

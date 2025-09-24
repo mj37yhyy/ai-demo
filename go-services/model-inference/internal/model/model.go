@@ -39,14 +39,14 @@ const (
 // Model 模型信息
 type Model struct {
 	ID          uint           `json:"id" gorm:"primaryKey"`
-	Name        string         `json:"name" gorm:"uniqueIndex;not null"`
-	Type        ModelType      `json:"type" gorm:"not null"`
-	Version     string         `json:"version" gorm:"not null"`
-	Description string         `json:"description"`
-	FilePath    string         `json:"file_path" gorm:"not null"`
+	Name        string         `json:"name" gorm:"type:varchar(100);uniqueIndex;not null"`
+	Type        ModelType      `json:"type" gorm:"type:varchar(50);not null"`
+	Version     string         `json:"version" gorm:"type:varchar(20);not null"`
+	Description string         `json:"description" gorm:"type:text"`
+	FilePath    string         `json:"file_path" gorm:"type:varchar(500);not null"`
 	FileSize    int64          `json:"file_size"`
-	Status      ModelStatus    `json:"status" gorm:"default:unloaded"`
-	Metadata    string         `json:"metadata" gorm:"type:jsonb"`
+	Status      ModelStatus    `json:"status" gorm:"type:varchar(20);default:unloaded"`
+	Metadata    string         `json:"metadata" gorm:"type:json"`
 	LoadedAt    *time.Time     `json:"loaded_at"`
 	CreatedAt   time.Time      `json:"created_at"`
 	UpdatedAt   time.Time      `json:"updated_at"`
@@ -56,12 +56,12 @@ type Model struct {
 // InferenceRequest 推理请求
 type InferenceRequest struct {
 	ID          uint            `json:"id" gorm:"primaryKey"`
-	RequestID   string          `json:"request_id" gorm:"uniqueIndex;not null"`
-	ModelName   string          `json:"model_name" gorm:"not null"`
-	InputData   string          `json:"input_data" gorm:"type:jsonb;not null"`
-	Status      InferenceStatus `json:"status" gorm:"default:pending"`
-	Result      string          `json:"result" gorm:"type:jsonb"`
-	Error       string          `json:"error"`
+	RequestID   string          `json:"request_id" gorm:"type:varchar(100);uniqueIndex;not null"`
+	ModelName   string          `json:"model_name" gorm:"type:varchar(100);not null"`
+	InputData   string          `json:"input_data" gorm:"type:json;not null"`
+	Status      InferenceStatus `json:"status" gorm:"type:varchar(20);default:pending"`
+	Result      string          `json:"result" gorm:"type:json"`
+	Error       string          `json:"error" gorm:"type:text"`
 	StartTime   time.Time       `json:"start_time"`
 	EndTime     *time.Time      `json:"end_time"`
 	Duration    int64           `json:"duration"` // 毫秒

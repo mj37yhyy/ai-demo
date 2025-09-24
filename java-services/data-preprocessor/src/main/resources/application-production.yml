@@ -1,0 +1,347 @@
+# Data Preprocessor Service Production Configuration
+
+server:
+  port: 8081
+  servlet:
+    context-path: /api/v1
+  compression:
+    enabled: true
+    mime-types: application/json,application/xml,text/html,text/xml,text/plain
+  tomcat:
+    max-threads: 300
+    min-spare-threads: 20
+    accept-count: 200
+    max-connections: 8192
+
+spring:
+  application:
+    name: data-preprocessor
+  
+  profiles:
+    active: production
+  
+  # Database Configuration
+  datasource:
+    url: jdbc:mysql://mysql:3306/ai_demo?useUnicode=true&characterEncoding=utf8&useSSL=false&serverTimezone=Asia/Shanghai&allowPublicKeyRetrieval=true
+    username: ai_user
+    password: ai_pass123
+    driver-class-name: com.mysql.cj.jdbc.Driver
+    hikari:
+      maximum-pool-size: 50
+      minimum-idle: 10
+      idle-timeout: 300000
+      connection-timeout: 20000
+      max-lifetime: 1200000
+      leak-detection-threshold: 60000
+      connection-test-query: SELECT 1
+  
+  # JPA Configuration
+  jpa:
+    hibernate:
+      ddl-auto: update
+      naming:
+        physical-strategy: org.hibernate.boot.model.naming.SnakeCasePhysicalNamingStrategy
+    show-sql: false
+    properties:
+      hibernate:
+        dialect: org.hibernate.dialect.MySQL8Dialect
+        format_sql: false
+        use_sql_comments: false
+        jdbc:
+          batch_size: 100
+          order_inserts: true
+          order_updates: true
+        cache:
+          use_second_level_cache: true
+          use_query_cache: true
+          region:
+            factory_class: org.hibernate.cache.jcache.JCacheRegionFactory
+  
+  # Redis Configuration
+  data:
+    redis:
+      host: redis
+      port: 6379
+      password: ""
+      database: 1
+      timeout: 5000ms
+      lettuce:
+        pool:
+          max-active: 50
+          max-idle: 20
+          min-idle: 10
+          max-wait: 5000ms
+        shutdown-timeout: 100ms
+  
+  # Kafka Configuration
+  kafka:
+    bootstrap-servers: kafka:9092
+    consumer:
+      group-id: data-preprocessor-group
+      auto-offset-reset: earliest
+      key-deserializer: org.apache.kafka.common.serialization.StringDeserializer
+      value-deserializer: org.apache.kafka.common.serialization.ByteArrayDeserializer
+      max-poll-records: 500
+      fetch-min-size: 1024
+      fetch-max-wait: 500ms
+      enable-auto-commit: false
+      properties:
+        session.timeout.ms: 30000
+        heartbeat.interval.ms: 3000
+        max.poll.interval.ms: 300000
+    producer:
+      key-serializer: org.apache.kafka.common.serialization.StringSerializer
+      value-serializer: org.apache.kafka.common.serialization.ByteArraySerializer
+      batch-size: 32768
+      linger-ms: 10
+      buffer-memory: 67108864
+      compression-type: snappy
+      retries: 5
+      acks: all
+      properties:
+        max.in.flight.requests.per.connection: 1
+        enable.idempotence: true
+    streams:
+      application-id: data-preprocessor-streams
+      default-key-serde: org.apache.kafka.common.serialization.Serdes$StringSerde
+      default-value-serde: org.apache.kafka.common.serialization.Serdes$ByteArraySerde
+      num-stream-threads: 4
+      commit-interval-ms: 1000
+      cache-max-bytes-buffering: 10485760
+  
+  # Cache Configuration
+  cache:
+    type: redis
+    redis:
+      time-to-live: 3600000  # 1 hour
+      cache-null-values: false
+      key-prefix: "preprocessor:"
+      use-key-prefix: true
+
+# Application Configuration
+app:
+  # Text Processing Configuration
+  text-processing:
+    # 清洗配置
+    cleaning:
+      remove-html: true
+      remove-urls: true
+      remove-emails: true
+      remove-phone-numbers: true
+      remove-special-chars: true
+      normalize-whitespace: true
+      convert-to-lowercase: false
+      min-text-length: 20
+      max-text-length: 50000
+      
+    # 分词配置
+    tokenization:
+      min-word-length: 1
+      max-word-length: 50
+      enable-pos-tagging: true
+      enable-ner: true
+      
+    # 特征提取配置
+    feature-extraction:
+      enable-statistical-features: true
+      enable-tfidf: true
+      enable-word2vec: true
+      enable-ngram: true
+      ngram-min: 1
+      ngram-max: 3
+      tfidf-max-features: 10000
+      word2vec-dimension: 300
+      
+    # 数据增强配置
+    data-augmentation:
+      enable-synonym-replacement: true
+      enable-random-insertion: true
+      enable-random-swap: true
+      enable-random-deletion: true
+      augmentation-ratio: 0.1
+      
+  # 知乎数据处理专用配置
+  zhihu:
+    processing:
+      # 内容过滤
+      content-filter:
+        min-length: 50
+        max-length: 20000
+        min-vote-count: 5
+        exclude-patterns:
+          - "广告"
+          - "推广"
+          - "spam"
+          - "删除"
+        
+      # 去重配置
+      deduplication:
+        enabled: true
+        similarity-threshold: 0.85
+        hash-algorithm: "sha256"
+        
+      # 质量评估
+      quality-assessment:
+        enabled: true
+        min-quality-score: 0.6
+        factors:
+          - length
+          - vote_count
+          - comment_count
+          - readability
+          
+      # 标签提取
+      tag-extraction:
+        enabled: true
+        max-tags: 10
+        min-tag-frequency: 3
+        
+  # 批处理配置
+  batch-processing:
+    enabled: true
+    batch-size: 100
+    max-concurrent-batches: 5
+    retry-attempts: 3
+    retry-delay: 5000
+    
+  # 性能配置
+  performance:
+    # 缓存配置
+    cache:
+      text-cleaning:
+        enabled: true
+        max-size: 10000
+        ttl: 3600
+      tokenization:
+        enabled: true
+        max-size: 5000
+        ttl: 1800
+      feature-extraction:
+        enabled: true
+        max-size: 2000
+        ttl: 7200
+        
+    # 线程池配置
+    thread-pool:
+      core-size: 10
+      max-size: 50
+      queue-capacity: 1000
+      keep-alive: 60
+      
+  # 监控配置
+  monitoring:
+    enabled: true
+    metrics:
+      processing-time: true
+      throughput: true
+      error-rate: true
+      cache-hit-rate: true
+      
+  # 数据存储配置
+  storage:
+    # 本地存储
+    local:
+      enabled: true
+      base-path: "/app/data/processed"
+      
+    # MinIO对象存储
+    minio:
+      enabled: true
+      endpoint: "http://minio:9000"
+      access-key: "minioadmin"
+      secret-key: "minioadmin123"
+      bucket: "ai-demo-processed"
+      
+    # 数据库存储
+    database:
+      enabled: true
+      batch-insert-size: 500
+      
+# Logging Configuration
+logging:
+  level:
+    root: INFO
+    com.textaudit.preprocessor: DEBUG
+    org.springframework.kafka: INFO
+    org.hibernate.SQL: WARN
+    org.hibernate.type.descriptor.sql.BasicBinder: WARN
+  pattern:
+    console: "%d{yyyy-MM-dd HH:mm:ss} [%thread] %-5level %logger{36} - %msg%n"
+    file: "%d{yyyy-MM-dd HH:mm:ss.SSS} [%thread] %-5level %logger{50} - %msg%n"
+  file:
+    name: "/app/logs/data-preprocessor.log"
+    max-size: 100MB
+    max-history: 30
+    total-size-cap: 1GB
+
+# Management Configuration
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info,metrics,prometheus,env,configprops
+      base-path: /actuator
+  endpoint:
+    health:
+      show-details: always
+      show-components: always
+    metrics:
+      enabled: true
+    prometheus:
+      enabled: true
+  metrics:
+    export:
+      prometheus:
+        enabled: true
+        step: 30s
+    tags:
+      application: data-preprocessor
+      environment: production
+      
+# Kafka Topics Configuration
+kafka:
+  topics:
+    raw-text: "raw_text"
+    processed-text: "processed_text"
+    text-features: "text_features"
+    processing-errors: "processing_errors"
+    
+# HanLP Configuration
+hanlp:
+  enable-debug: false
+  enable-custom-dictionary: true
+  custom-dictionary-path: "/app/config/custom_dict.txt"
+  
+# Security Configuration (if needed)
+security:
+  # API Key validation
+  api-key:
+    enabled: false
+    header-name: "X-API-Key"
+    
+  # Rate limiting
+  rate-limit:
+    enabled: true
+    requests-per-minute: 1000
+    
+# Circuit Breaker Configuration
+resilience4j:
+  circuitbreaker:
+    instances:
+      textProcessing:
+        register-health-indicator: true
+        sliding-window-size: 100
+        minimum-number-of-calls: 10
+        permitted-number-of-calls-in-half-open-state: 3
+        automatic-transition-from-open-to-half-open-enabled: true
+        wait-duration-in-open-state: 5s
+        failure-rate-threshold: 50
+        record-exceptions:
+          - java.lang.Exception
+  retry:
+    instances:
+      textProcessing:
+        max-attempts: 3
+        wait-duration: 1s
+        retry-exceptions:
+          - java.lang.Exception
