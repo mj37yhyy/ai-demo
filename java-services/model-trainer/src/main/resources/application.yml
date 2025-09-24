@@ -1,0 +1,270 @@
+server:
+  port: 8082
+  servlet:
+    context-path: /api
+  compression:
+    enabled: true
+    mime-types: text/html,text/xml,text/plain,text/css,text/javascript,application/javascript,application/json
+    min-response-size: 1024
+
+spring:
+  application:
+    name: model-trainer
+  profiles:
+    active: dev
+  
+  # 数据库配置
+  datasource:
+    url: jdbc:mysql://localhost:3306/text_audit_trainer?useUnicode=true&characterEncoding=utf8&useSSL=false&serverTimezone=Asia/Shanghai&allowPublicKeyRetrieval=true
+    username: root
+    password: password
+    driver-class-name: com.mysql.cj.jdbc.Driver
+    hikari:
+      maximum-pool-size: 20
+      minimum-idle: 5
+      idle-timeout: 300000
+      connection-timeout: 20000
+      max-lifetime: 1200000
+      leak-detection-threshold: 60000
+  
+  # JPA配置
+  jpa:
+    hibernate:
+      ddl-auto: update
+    show-sql: false
+    properties:
+      hibernate:
+        dialect: org.hibernate.dialect.MySQL8Dialect
+        format_sql: true
+        use_sql_comments: true
+        jdbc:
+          batch_size: 50
+          order_inserts: true
+          order_updates: true
+        cache:
+          use_second_level_cache: true
+          use_query_cache: true
+          region:
+            factory_class: org.hibernate.cache.jcache.JCacheRegionFactory
+  
+  # Redis配置
+  redis:
+    host: localhost
+    port: 6379
+    password: 
+    timeout: 5000ms
+    lettuce:
+      pool:
+        max-active: 20
+        max-idle: 10
+        min-idle: 5
+        max-wait: 2000ms
+  
+  # Kafka配置
+  kafka:
+    bootstrap-servers: localhost:9092
+    producer:
+      key-serializer: org.apache.kafka.common.serialization.StringSerializer
+      value-serializer: org.springframework.kafka.support.serializer.JsonSerializer
+      acks: all
+      retries: 3
+      batch-size: 16384
+      linger-ms: 5
+      buffer-memory: 33554432
+    consumer:
+      group-id: model-trainer-group
+      key-deserializer: org.apache.kafka.common.serialization.StringDeserializer
+      value-deserializer: org.springframework.kafka.support.serializer.JsonDeserializer
+      auto-offset-reset: earliest
+      enable-auto-commit: false
+      max-poll-records: 100
+      properties:
+        spring.json.trusted.packages: "com.textaudit.*"
+  
+  # 缓存配置
+  cache:
+    type: redis
+    redis:
+      time-to-live: 3600000
+      cache-null-values: false
+  
+  # Jackson配置
+  jackson:
+    default-property-inclusion: non_null
+    serialization:
+      write-dates-as-timestamps: false
+    deserialization:
+      fail-on-unknown-properties: false
+
+# gRPC配置
+grpc:
+  server:
+    port: 9092
+    enable-reflection: true
+
+# Actuator配置
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info,metrics,prometheus,env,beans,configprops
+  endpoint:
+    health:
+      show-details: always
+  metrics:
+    export:
+      prometheus:
+        enabled: true
+
+# 日志配置
+logging:
+  level:
+    com.textaudit.trainer: DEBUG
+    org.springframework.kafka: INFO
+    org.hibernate.SQL: DEBUG
+    org.hibernate.type.descriptor.sql.BasicBinder: TRACE
+  pattern:
+    console: "%d{yyyy-MM-dd HH:mm:ss.SSS} [%thread] %-5level %logger{36} - %msg%n"
+    file: "%d{yyyy-MM-dd HH:mm:ss.SSS} [%thread] %-5level %logger{36} - %msg%n"
+  file:
+    name: logs/model-trainer.log
+    max-size: 100MB
+    max-history: 30
+
+# 自定义配置
+model-training:
+  # 模型存储配置
+  storage:
+    base-path: /app/models
+    backup-path: /app/models/backup
+    temp-path: /app/models/temp
+  
+  # 训练配置
+  training:
+    batch-size: 32
+    max-epochs: 100
+    early-stopping-patience: 10
+    learning-rate: 0.001
+    validation-split: 0.2
+    test-split: 0.1
+    cross-validation-folds: 5
+  
+  # 深度学习配置
+  deep-learning:
+    # LSTM配置
+    lstm:
+      hidden-size: 128
+      num-layers: 2
+      dropout: 0.3
+      bidirectional: true
+    
+    # CNN配置
+    cnn:
+      filter-sizes: [3, 4, 5]
+      num-filters: 100
+      dropout: 0.5
+    
+    # Transformer配置
+    transformer:
+      d-model: 512
+      num-heads: 8
+      num-layers: 6
+      dropout: 0.1
+      max-seq-length: 512
+  
+  # 传统机器学习配置
+  ml:
+    # 随机森林配置
+    random-forest:
+      num-trees: 100
+      max-depth: 20
+      min-samples-split: 2
+      min-samples-leaf: 1
+    
+    # SVM配置
+    svm:
+      kernel: rbf
+      c: 1.0
+      gamma: scale
+    
+    # 逻辑回归配置
+    logistic-regression:
+      max-iter: 1000
+      regularization: l2
+      c: 1.0
+  
+  # 模型评估配置
+  evaluation:
+    metrics: [accuracy, precision, recall, f1, auc]
+    cross-validation: true
+    bootstrap-samples: 1000
+  
+  # 超参数优化配置
+  hyperparameter-tuning:
+    enabled: true
+    method: grid_search  # grid_search, random_search, bayesian
+    max-trials: 50
+    timeout-minutes: 120
+
+# Kafka主题配置
+kafka:
+  topics:
+    processed-text: processed-text-topic
+    model-training-request: model-training-request-topic
+    model-training-result: model-training-result-topic
+    model-evaluation: model-evaluation-topic
+    hyperparameter-tuning: hyperparameter-tuning-topic
+
+# 处理配置
+processing:
+  thread-pool:
+    core-size: 4
+    max-size: 16
+    queue-capacity: 1000
+    keep-alive-seconds: 60
+  
+  batch:
+    size: 1000
+    timeout-seconds: 30
+
+---
+# 开发环境配置
+spring:
+  profiles: dev
+  datasource:
+    url: jdbc:mysql://localhost:3306/text_audit_trainer_dev?useUnicode=true&characterEncoding=utf8&useSSL=false&serverTimezone=Asia/Shanghai&allowPublicKeyRetrieval=true
+  jpa:
+    show-sql: true
+    hibernate:
+      ddl-auto: create-drop
+
+logging:
+  level:
+    com.textaudit.trainer: DEBUG
+    org.springframework.kafka: DEBUG
+
+---
+# 生产环境配置
+spring:
+  profiles: prod
+  datasource:
+    url: jdbc:mysql://mysql:3306/text_audit_trainer?useUnicode=true&characterEncoding=utf8&useSSL=false&serverTimezone=Asia/Shanghai&allowPublicKeyRetrieval=true
+    username: ${DB_USERNAME:root}
+    password: ${DB_PASSWORD:password}
+  redis:
+    host: redis
+    password: ${REDIS_PASSWORD:}
+  kafka:
+    bootstrap-servers: kafka:9092
+
+logging:
+  level:
+    com.textaudit.trainer: INFO
+    org.springframework.kafka: WARN
+  file:
+    name: /app/logs/model-trainer.log
+
+model-training:
+  storage:
+    base-path: /app/models
+    backup-path: /app/models/backup

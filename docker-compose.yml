@@ -1,0 +1,228 @@
+version: '3.8'
+
+services:
+  # MySQL 数据库
+  mysql:
+    image: mysql:8.0
+    container_name: text-audit-mysql
+    environment:
+      MYSQL_ROOT_PASSWORD: root123
+      MYSQL_DATABASE: text_audit
+      MYSQL_USER: audit_user
+      MYSQL_PASSWORD: audit_pass
+    ports:
+      - "3306:3306"
+    volumes:
+      - mysql_data:/var/lib/mysql
+      - ./docker/mysql/init.sql:/docker-entrypoint-initdb.d/init.sql
+    networks:
+      - text-audit-network
+
+  # Redis 缓存
+  redis:
+    image: redis:7-alpine
+    container_name: text-audit-redis
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis_data:/data
+    networks:
+      - text-audit-network
+
+  # MinIO 对象存储
+  minio:
+    image: minio/minio:latest
+    container_name: text-audit-minio
+    environment:
+      MINIO_ROOT_USER: minioadmin
+      MINIO_ROOT_PASSWORD: minioadmin123
+    ports:
+      - "9000:9000"
+      - "9001:9001"
+    volumes:
+      - minio_data:/data
+    command: server /data --console-address ":9001"
+    networks:
+      - text-audit-network
+
+  # Zookeeper
+  zookeeper:
+    image: confluentinc/cp-zookeeper:7.4.0
+    container_name: text-audit-zookeeper
+    environment:
+      ZOOKEEPER_CLIENT_PORT: 2181
+      ZOOKEEPER_TICK_TIME: 2000
+    ports:
+      - "2181:2181"
+    networks:
+      - text-audit-network
+
+  # Kafka
+  kafka:
+    image: confluentinc/cp-kafka:7.4.0
+    container_name: text-audit-kafka
+    depends_on:
+      - zookeeper
+    environment:
+      KAFKA_BROKER_ID: 1
+      KAFKA_ZOOKEEPER_CONNECT: zookeeper:2181
+      KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://localhost:9092
+      KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1
+      KAFKA_AUTO_CREATE_TOPICS_ENABLE: true
+    ports:
+      - "9092:9092"
+    networks:
+      - text-audit-network
+
+  # Prometheus 监控
+  prometheus:
+    image: prom/prometheus:latest
+    container_name: text-audit-prometheus
+    ports:
+      - "9090:9090"
+    volumes:
+      - ./monitoring/prometheus.yml:/etc/prometheus/prometheus.yml
+      - prometheus_data:/prometheus
+    command:
+      - '--config.file=/etc/prometheus/prometheus.yml'
+      - '--storage.tsdb.path=/prometheus'
+      - '--web.console.libraries=/etc/prometheus/console_libraries'
+      - '--web.console.templates=/etc/prometheus/consoles'
+    networks:
+      - text-audit-network
+
+  # Grafana 可视化
+  grafana:
+    image: grafana/grafana:latest
+    container_name: text-audit-grafana
+    environment:
+      GF_SECURITY_ADMIN_PASSWORD: admin123
+    ports:
+      - "3000:3000"
+    volumes:
+      - grafana_data:/var/lib/grafana
+      - ./monitoring/grafana/dashboards:/etc/grafana/provisioning/dashboards
+      - ./monitoring/grafana/datasources:/etc/grafana/provisioning/datasources
+    networks:
+      - text-audit-network
+
+  # 数据收集服务 (Go)
+  data-collector:
+    build:
+      context: ./go-services/data-collector
+      dockerfile: Dockerfile
+    container_name: text-audit-data-collector
+    environment:
+      - DATABASE_HOST=mysql
+      - DATABASE_PORT=3306
+      - DATABASE_USER=audit_user
+      - DATABASE_PASSWORD=audit_pass
+      - DATABASE_NAME=text_audit
+      - REDIS_HOST=redis
+      - REDIS_PORT=6379
+      - KAFKA_BROKERS=kafka:9092
+      - MINIO_ENDPOINT=minio:9000
+      - MINIO_ACCESS_KEY=minioadmin
+      - MINIO_SECRET_KEY=minioadmin123
+    ports:
+      - "8081:8081"
+    depends_on:
+      - mysql
+      - redis
+      - kafka
+      - minio
+    volumes:
+      - ./go-services/data-collector/config:/app/config
+    networks:
+      - text-audit-network
+
+  # 数据预处理服务 (Java)
+  data-preprocessor:
+    build:
+      context: ./java-services/data-preprocessor
+      dockerfile: Dockerfile
+    container_name: text-audit-data-preprocessor
+    environment:
+      - SPRING_DATASOURCE_URL=jdbc:mysql://mysql:3306/text_audit
+      - SPRING_DATASOURCE_USERNAME=audit_user
+      - SPRING_DATASOURCE_PASSWORD=audit_pass
+      - SPRING_REDIS_HOST=redis
+      - SPRING_REDIS_PORT=6379
+      - SPRING_KAFKA_BOOTSTRAP_SERVERS=kafka:9092
+      - MINIO_ENDPOINT=http://minio:9000
+      - MINIO_ACCESS_KEY=minioadmin
+      - MINIO_SECRET_KEY=minioadmin123
+    ports:
+      - "8082:8082"
+    depends_on:
+      - mysql
+      - redis
+      - kafka
+      - minio
+    networks:
+      - text-audit-network
+
+  # 模型训练服务 (Java)
+  model-trainer:
+    build:
+      context: ./java-services/model-trainer
+      dockerfile: Dockerfile
+    container_name: text-audit-model-trainer
+    environment:
+      - SPRING_DATASOURCE_URL=jdbc:mysql://mysql:3306/text_audit
+      - SPRING_DATASOURCE_USERNAME=audit_user
+      - SPRING_DATASOURCE_PASSWORD=audit_pass
+      - SPRING_REDIS_HOST=redis
+      - SPRING_REDIS_PORT=6379
+      - SPRING_KAFKA_BOOTSTRAP_SERVERS=kafka:9092
+      - MINIO_ENDPOINT=http://minio:9000
+      - MINIO_ACCESS_KEY=minioadmin
+      - MINIO_SECRET_KEY=minioadmin123
+    ports:
+      - "8084:8084"
+    depends_on:
+      - mysql
+      - redis
+      - kafka
+      - minio
+    volumes:
+      - model_data:/app/models
+    networks:
+      - text-audit-network
+
+  # 模型推理服务 (Go)
+  model-inference:
+    build:
+      context: ./go-services/model-inference
+      dockerfile: Dockerfile
+    container_name: text-audit-model-inference
+    environment:
+      - DATABASE_HOST=mysql
+      - DATABASE_PORT=3306
+      - DATABASE_USER=audit_user
+      - DATABASE_PASSWORD=audit_pass
+      - DATABASE_NAME=text_audit
+      - REDIS_HOST=redis
+      - REDIS_PORT=6379
+    ports:
+      - "8083:8083"
+    depends_on:
+      - mysql
+      - redis
+    volumes:
+      - model_data:/app/models
+      - ./go-services/model-inference/config:/root/config
+    networks:
+      - text-audit-network
+
+volumes:
+  mysql_data:
+  redis_data:
+  minio_data:
+  prometheus_data:
+  grafana_data:
+  model_data:
+
+networks:
+  text-audit-network:
+    driver: bridge

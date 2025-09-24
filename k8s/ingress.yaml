@@ -1,0 +1,112 @@
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: text-audit-ingress
+  namespace: text-audit
+  annotations:
+    nginx.ingress.kubernetes.io/rewrite-target: /
+    nginx.ingress.kubernetes.io/cors-allow-origin: "*"
+    nginx.ingress.kubernetes.io/cors-allow-methods: "GET, POST, PUT, DELETE, OPTIONS"
+    nginx.ingress.kubernetes.io/cors-allow-headers: "DNT,User-Agent,X-Requested-With,If-Modified-Since,Cache-Control,Content-Type,Range,Authorization"
+    nginx.ingress.kubernetes.io/enable-cors: "true"
+spec:
+  ingressClassName: nginx
+  rules:
+  - host: text-audit.local
+    http:
+      paths:
+      # 数据收集服务
+      - path: /api/v1/data
+        pathType: Prefix
+        backend:
+          service:
+            name: data-collector-service
+            port:
+              number: 8081
+      # 数据预处理服务
+      - path: /api/v1/preprocess
+        pathType: Prefix
+        backend:
+          service:
+            name: data-preprocessor-service
+            port:
+              number: 8082
+      # 模型推理服务
+      - path: /api/v1/inference
+        pathType: Prefix
+        backend:
+          service:
+            name: model-inference-service
+            port:
+              number: 8083
+      - path: /api/v1/models
+        pathType: Prefix
+        backend:
+          service:
+            name: model-inference-service
+            port:
+              number: 8083
+      - path: /api/v1/text
+        pathType: Prefix
+        backend:
+          service:
+            name: model-inference-service
+            port:
+              number: 8083
+      # 模型训练服务
+      - path: /api/v1/training
+        pathType: Prefix
+        backend:
+          service:
+            name: model-trainer-service
+            port:
+              number: 8084
+      # 健康检查
+      - path: /health
+        pathType: Prefix
+        backend:
+          service:
+            name: model-inference-service
+            port:
+              number: 8083
+      # Swagger文档
+      - path: /swagger
+        pathType: Prefix
+        backend:
+          service:
+            name: model-inference-service
+            port:
+              number: 8083
+      # Prometheus监控
+      - path: /metrics
+        pathType: Prefix
+        backend:
+          service:
+            name: prometheus-service
+            port:
+              number: 9090
+      # Grafana仪表板
+      - path: /grafana
+        pathType: Prefix
+        backend:
+          service:
+            name: grafana-service
+            port:
+              number: 3000
+
+---
+# 用于开发环境的NodePort服务
+apiVersion: v1
+kind: Service
+metadata:
+  name: text-audit-nodeport
+  namespace: text-audit
+spec:
+  type: NodePort
+  selector:
+    app: model-inference
+  ports:
+  - name: http
+    port: 8083
+    targetPort: 8083
+    nodePort: 30083

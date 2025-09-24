@@ -1,0 +1,296 @@
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: data-preprocessor-pvc
+  namespace: text-audit
+spec:
+  accessModes:
+    - ReadWriteOnce
+  resources:
+    requests:
+      storage: 5Gi
+
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: data-preprocessor
+  namespace: text-audit
+  labels:
+    app: data-preprocessor
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app: data-preprocessor
+  template:
+    metadata:
+      labels:
+        app: data-preprocessor
+    spec:
+      containers:
+      - name: data-preprocessor
+        image: text-audit/data-preprocessor:latest
+        ports:
+        - containerPort: 8082
+        env:
+        - name: SPRING_PROFILES_ACTIVE
+          value: "production"
+        - name: DB_HOST
+          valueFrom:
+            configMapKeyRef:
+              name: text-audit-config
+              key: DATABASE_HOST
+        - name: DB_PORT
+          valueFrom:
+            configMapKeyRef:
+              name: text-audit-config
+              key: DATABASE_PORT
+        - name: DB_NAME
+          valueFrom:
+            configMapKeyRef:
+              name: text-audit-config
+              key: DATABASE_NAME
+        - name: DB_USERNAME
+          valueFrom:
+            configMapKeyRef:
+              name: text-audit-config
+              key: DATABASE_USERNAME
+        - name: DB_PASSWORD
+          valueFrom:
+            secretKeyRef:
+              name: text-audit-secrets
+              key: DATABASE_PASSWORD
+        - name: REDIS_HOST
+          valueFrom:
+            configMapKeyRef:
+              name: text-audit-config
+              key: REDIS_HOST
+        - name: REDIS_PORT
+          valueFrom:
+            configMapKeyRef:
+              name: text-audit-config
+              key: REDIS_PORT
+        - name: REDIS_PASSWORD
+          valueFrom:
+            secretKeyRef:
+              name: text-audit-secrets
+              key: REDIS_PASSWORD
+        - name: KAFKA_BOOTSTRAP_SERVERS
+          valueFrom:
+            configMapKeyRef:
+              name: text-audit-config
+              key: KAFKA_BOOTSTRAP_SERVERS
+        - name: MINIO_ENDPOINT
+          valueFrom:
+            configMapKeyRef:
+              name: text-audit-config
+              key: MINIO_ENDPOINT
+        - name: MINIO_ACCESS_KEY
+          valueFrom:
+            configMapKeyRef:
+              name: text-audit-config
+              key: MINIO_ACCESS_KEY
+        - name: MINIO_SECRET_KEY
+          valueFrom:
+            secretKeyRef:
+              name: text-audit-secrets
+              key: MINIO_SECRET_KEY
+        volumeMounts:
+        - name: config-volume
+          mountPath: /app/config
+        - name: data-volume
+          mountPath: /app/data
+        resources:
+          requests:
+            memory: "1Gi"
+            cpu: "500m"
+          limits:
+            memory: "2Gi"
+            cpu: "1000m"
+        livenessProbe:
+          httpGet:
+            path: /actuator/health
+            port: 8082
+          initialDelaySeconds: 60
+          periodSeconds: 30
+          timeoutSeconds: 10
+        readinessProbe:
+          httpGet:
+            path: /actuator/health/readiness
+            port: 8082
+          initialDelaySeconds: 30
+          periodSeconds: 10
+          timeoutSeconds: 5
+      volumes:
+      - name: config-volume
+        configMap:
+          name: data-preprocessor-config
+      - name: data-volume
+        persistentVolumeClaim:
+          claimName: data-preprocessor-pvc
+
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: data-preprocessor-service
+  namespace: text-audit
+  labels:
+    app: data-preprocessor
+spec:
+  selector:
+    app: data-preprocessor
+  ports:
+  - port: 8082
+    targetPort: 8082
+    name: http
+
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: data-preprocessor-config
+  namespace: text-audit
+data:
+  application.yml: |
+    server:
+      port: 8082
+      servlet:
+        context-path: /api/v1
+
+    spring:
+      application:
+        name: data-preprocessor
+      
+      datasource:
+        url: jdbc:mysql://${DB_HOST:mysql-service}:${DB_PORT:3306}/${DB_NAME:text_audit}?useUnicode=true&characterEncoding=utf8&useSSL=false&serverTimezone=Asia/Shanghai&allowPublicKeyRetrieval=true
+        username: ${DB_USERNAME:audit_user}
+        password: ${DB_PASSWORD:audit_pass}
+        driver-class-name: com.mysql.cj.jdbc.Driver
+        hikari:
+          maximum-pool-size: 20
+          minimum-idle: 5
+          idle-timeout: 300000
+          connection-timeout: 20000
+          max-lifetime: 1200000
+
+      jpa:
+        hibernate:
+          ddl-auto: validate
+        show-sql: false
+        properties:
+          hibernate:
+            dialect: org.hibernate.dialect.MySQL8Dialect
+            format_sql: true
+            use_sql_comments: true
+
+      data:
+        redis:
+          host: ${REDIS_HOST:redis-service}
+          port: ${REDIS_PORT:6379}
+          password: ${REDIS_PASSWORD:}
+          timeout: 2000ms
+          lettuce:
+            pool:
+              max-active: 20
+              max-idle: 10
+              min-idle: 5
+
+      kafka:
+        bootstrap-servers: ${KAFKA_BOOTSTRAP_SERVERS:kafka-service:9092}
+        consumer:
+          group-id: data-preprocessor-group
+          auto-offset-reset: earliest
+          key-deserializer: org.apache.kafka.common.serialization.StringDeserializer
+          value-deserializer: org.apache.kafka.common.serialization.StringDeserializer
+          max-poll-records: 100
+          fetch-min-size: 1024
+          fetch-max-wait: 500ms
+        producer:
+          key-serializer: org.apache.kafka.common.serialization.StringSerializer
+          value-serializer: org.apache.kafka.common.serialization.StringSerializer
+          acks: all
+          retries: 3
+          batch-size: 16384
+          linger-ms: 5
+          buffer-memory: 33554432
+
+    # 应用配置
+    textaudit:
+      preprocessor:
+        # 数据处理配置
+        processing:
+          batch-size: 100
+          max-text-length: 10000
+          min-text-length: 5
+          thread-pool-size: 10
+          
+        # 分词配置
+        tokenizer:
+          type: hanlp
+          dictionary-path: /app/data/dict
+          user-dict-enabled: true
+          
+        # 停用词配置
+        stopwords:
+          enabled: true
+          custom-words-enabled: true
+          languages: ["zh", "en"]
+          
+        # 特征提取配置
+        feature-extraction:
+          tfidf:
+            max-features: 10000
+            min-df: 2
+            max-df: 0.95
+            ngram-range: [1, 2]
+          
+        # 缓存配置
+        cache:
+          enabled: true
+          ttl: 3600
+          max-size: 10000
+
+    # Kafka Topics
+    kafka:
+      topics:
+        raw-text: raw-text-topic
+        processed-text: processed-text-topic
+        processing-error: processing-error-topic
+        raw-text-batch: raw-text-batch-topic
+
+    # MinIO配置
+    minio:
+      endpoint: ${MINIO_ENDPOINT:http://minio-service:9000}
+      access-key: ${MINIO_ACCESS_KEY:minioadmin}
+      secret-key: ${MINIO_SECRET_KEY:minioadmin}
+      bucket-name: text-audit-data
+
+    # 监控配置
+    management:
+      endpoints:
+        web:
+          exposure:
+            include: health,info,metrics,prometheus
+      endpoint:
+        health:
+          show-details: always
+      metrics:
+        export:
+          prometheus:
+            enabled: true
+
+    # 日志配置
+    logging:
+      level:
+        com.textaudit: INFO
+        org.springframework.kafka: WARN
+        org.hibernate: WARN
+      pattern:
+        console: "%d{yyyy-MM-dd HH:mm:ss} [%thread] %-5level %logger{36} - %msg%n"
+        file: "%d{yyyy-MM-dd HH:mm:ss} [%thread] %-5level %logger{36} - %msg%n"
+      file:
+        name: /app/logs/data-preprocessor.log
+        max-size: 100MB
+        max-history: 30

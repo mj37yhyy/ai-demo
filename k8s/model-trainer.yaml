@@ -1,0 +1,329 @@
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: model-trainer-pvc
+  namespace: text-audit
+spec:
+  accessModes:
+    - ReadWriteOnce
+  resources:
+    requests:
+      storage: 20Gi
+
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: model-trainer
+  namespace: text-audit
+  labels:
+    app: model-trainer
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: model-trainer
+  template:
+    metadata:
+      labels:
+        app: model-trainer
+    spec:
+      containers:
+      - name: model-trainer
+        image: text-audit/model-trainer:latest
+        ports:
+        - containerPort: 8084
+        env:
+        - name: SPRING_PROFILES_ACTIVE
+          value: "production"
+        - name: DB_HOST
+          valueFrom:
+            configMapKeyRef:
+              name: text-audit-config
+              key: DATABASE_HOST
+        - name: DB_PORT
+          valueFrom:
+            configMapKeyRef:
+              name: text-audit-config
+              key: DATABASE_PORT
+        - name: DB_NAME
+          valueFrom:
+            configMapKeyRef:
+              name: text-audit-config
+              key: DATABASE_NAME
+        - name: DB_USERNAME
+          valueFrom:
+            configMapKeyRef:
+              name: text-audit-config
+              key: DATABASE_USERNAME
+        - name: DB_PASSWORD
+          valueFrom:
+            secretKeyRef:
+              name: text-audit-secrets
+              key: DATABASE_PASSWORD
+        - name: REDIS_HOST
+          valueFrom:
+            configMapKeyRef:
+              name: text-audit-config
+              key: REDIS_HOST
+        - name: REDIS_PORT
+          valueFrom:
+            configMapKeyRef:
+              name: text-audit-config
+              key: REDIS_PORT
+        - name: REDIS_PASSWORD
+          valueFrom:
+            secretKeyRef:
+              name: text-audit-secrets
+              key: REDIS_PASSWORD
+        - name: KAFKA_BOOTSTRAP_SERVERS
+          valueFrom:
+            configMapKeyRef:
+              name: text-audit-config
+              key: KAFKA_BOOTSTRAP_SERVERS
+        - name: MINIO_ENDPOINT
+          valueFrom:
+            configMapKeyRef:
+              name: text-audit-config
+              key: MINIO_ENDPOINT
+        - name: MINIO_ACCESS_KEY
+          valueFrom:
+            configMapKeyRef:
+              name: text-audit-config
+              key: MINIO_ACCESS_KEY
+        - name: MINIO_SECRET_KEY
+          valueFrom:
+            secretKeyRef:
+              name: text-audit-secrets
+              key: MINIO_SECRET_KEY
+        volumeMounts:
+        - name: config-volume
+          mountPath: /app/config
+        - name: model-volume
+          mountPath: /app/models
+        - name: dataset-volume
+          mountPath: /app/datasets
+        resources:
+          requests:
+            memory: "2Gi"
+            cpu: "1000m"
+          limits:
+            memory: "4Gi"
+            cpu: "2000m"
+        livenessProbe:
+          httpGet:
+            path: /actuator/health
+            port: 8084
+          initialDelaySeconds: 120
+          periodSeconds: 30
+          timeoutSeconds: 10
+        readinessProbe:
+          httpGet:
+            path: /actuator/health/readiness
+            port: 8084
+          initialDelaySeconds: 60
+          periodSeconds: 10
+          timeoutSeconds: 5
+      volumes:
+      - name: config-volume
+        configMap:
+          name: model-trainer-config
+      - name: model-volume
+        persistentVolumeClaim:
+          claimName: model-trainer-pvc
+      - name: dataset-volume
+        persistentVolumeClaim:
+          claimName: model-trainer-pvc
+
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: model-trainer-service
+  namespace: text-audit
+  labels:
+    app: model-trainer
+spec:
+  selector:
+    app: model-trainer
+  ports:
+  - port: 8084
+    targetPort: 8084
+    name: http
+
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: model-trainer-config
+  namespace: text-audit
+data:
+  application.yml: |
+    server:
+      port: 8084
+      servlet:
+        context-path: /api/v1
+
+    spring:
+      application:
+        name: model-trainer
+      
+      datasource:
+        url: jdbc:mysql://${DB_HOST:mysql-service}:${DB_PORT:3306}/${DB_NAME:text_audit}?useUnicode=true&characterEncoding=utf8&useSSL=false&serverTimezone=Asia/Shanghai&allowPublicKeyRetrieval=true
+        username: ${DB_USERNAME:audit_user}
+        password: ${DB_PASSWORD:audit_pass}
+        driver-class-name: com.mysql.cj.jdbc.Driver
+        hikari:
+          maximum-pool-size: 20
+          minimum-idle: 5
+          idle-timeout: 300000
+          connection-timeout: 20000
+          max-lifetime: 1200000
+
+      jpa:
+        hibernate:
+          ddl-auto: validate
+        show-sql: false
+        properties:
+          hibernate:
+            dialect: org.hibernate.dialect.MySQL8Dialect
+            format_sql: true
+            use_sql_comments: true
+
+      data:
+        redis:
+          host: ${REDIS_HOST:redis-service}
+          port: ${REDIS_PORT:6379}
+          password: ${REDIS_PASSWORD:}
+          timeout: 2000ms
+          lettuce:
+            pool:
+              max-active: 20
+              max-idle: 10
+              min-idle: 5
+
+      kafka:
+        bootstrap-servers: ${KAFKA_BOOTSTRAP_SERVERS:kafka-service:9092}
+        consumer:
+          group-id: model-trainer-group
+          auto-offset-reset: earliest
+          key-deserializer: org.apache.kafka.common.serialization.StringDeserializer
+          value-deserializer: org.apache.kafka.common.serialization.StringDeserializer
+          max-poll-records: 50
+          fetch-min-size: 1024
+          fetch-max-wait: 500ms
+        producer:
+          key-serializer: org.apache.kafka.common.serialization.StringSerializer
+          value-serializer: org.apache.kafka.common.serialization.StringSerializer
+          acks: all
+          retries: 3
+          batch-size: 16384
+          linger-ms: 5
+          buffer-memory: 33554432
+
+    # 应用配置
+    textaudit:
+      trainer:
+        # 模型存储配置
+        model-storage-path: /app/models
+        dataset-storage-path: /app/datasets
+        temp-storage-path: /app/temp
+        
+        # 训练配置
+        training:
+          max-concurrent-jobs: 2
+          default-batch-size: 32
+          default-epochs: 100
+          early-stopping-patience: 10
+          validation-split: 0.2
+          
+        # 算法配置
+        algorithms:
+          # 传统机器学习
+          logistic-regression:
+            enabled: true
+            max-iterations: 1000
+            regularization: 0.01
+          random-forest:
+            enabled: true
+            n-estimators: 100
+            max-depth: 10
+          svm:
+            enabled: true
+            kernel: rbf
+            c: 1.0
+            
+          # 深度学习
+          lstm:
+            enabled: true
+            hidden-size: 128
+            num-layers: 2
+            dropout: 0.2
+          cnn:
+            enabled: true
+            filter-sizes: [3, 4, 5]
+            num-filters: 100
+            dropout: 0.5
+          transformer:
+            enabled: true
+            d-model: 512
+            num-heads: 8
+            num-layers: 6
+            
+        # 评估配置
+        evaluation:
+          metrics: ["accuracy", "precision", "recall", "f1"]
+          cross-validation-folds: 5
+          test-size: 0.2
+          
+        # 超参数调优
+        hyperparameter-tuning:
+          enabled: true
+          method: grid-search
+          max-trials: 50
+          timeout-minutes: 120
+
+    # Kafka Topics
+    kafka:
+      topics:
+        processed-text: processed-text-topic
+        model-training-request: model-training-request-topic
+        model-training-result: model-training-result-topic
+        model-evaluation: model-evaluation-topic
+        hyperparameter-tuning: hyperparameter-tuning-topic
+
+    # MinIO配置
+    minio:
+      endpoint: ${MINIO_ENDPOINT:http://minio-service:9000}
+      access-key: ${MINIO_ACCESS_KEY:minioadmin}
+      secret-key: ${MINIO_SECRET_KEY:minioadmin}
+      bucket-name: text-audit-models
+
+    # 监控配置
+    management:
+      endpoints:
+        web:
+          exposure:
+            include: health,info,metrics,prometheus
+      endpoint:
+        health:
+          show-details: always
+      metrics:
+        export:
+          prometheus:
+            enabled: true
+
+    # 日志配置
+    logging:
+      level:
+        com.textaudit: INFO
+        org.springframework.kafka: WARN
+        org.hibernate: WARN
+        org.deeplearning4j: INFO
+      pattern:
+        console: "%d{yyyy-MM-dd HH:mm:ss} [%thread] %-5level %logger{36} - %msg%n"
+        file: "%d{yyyy-MM-dd HH:mm:ss} [%thread] %-5level %logger{36} - %msg%n"
+      file:
+        name: /app/logs/model-trainer.log
+        max-size: 100MB
+        max-history: 30

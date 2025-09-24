@@ -1,0 +1,345 @@
+package service
+
+import (
+	"context"
+	"encoding/json"
+	"fmt"
+	"sync"
+	"time"
+
+	"github.com/google/uuid"
+	"github.com/sirupsen/logrus"
+	"gorm.io/gorm"
+
+	"github.com/text-audit/data-collector/internal/config"
+	"github.com/text-audit/data-collector/internal/collector"
+	"github.com/text-audit/data-collector/internal/model"
+	"github.com/text-audit/data-collector/internal/repository"
+	pb "github.com/text-audit/data-collector/proto"
+)
+
+type CollectorService struct {
+	pb.UnimplementedDataCollectionServiceServer
+	
+	config     *config.Config
+	repo       *repository.Repository
+	collectors map[pb.SourceType]collector.Collector
+	tasks      map[string]*CollectionTask
+	tasksMutex sync.RWMutex
+}
+
+type CollectionTask struct {
+	ID              string
+	SourceType      pb.SourceType
+	Config          *pb.CollectionConfig
+	Status          pb.CollectionStatus
+	CollectedCount  int32
+	TotalCount      int32
+	Progress        int32
+	StartTime       *time.Time
+	EndTime         *time.Time
+	ErrorMessage    string
+	cancelFunc      context.CancelFunc
+}
+
+func NewCollectorService(cfg *config.Config) (*CollectorService, error) {
+	// 初始化数据库连接
+	repo, err := repository.NewRepository(cfg)
+	if err != nil {
+		return nil, fmt.Errorf("failed to create repository: %w", err)
+	}
+
+	// 初始化采集器
+	collectors := make(map[pb.SourceType]collector.Collector)
+	
+	// API 采集器
+	apiCollector, err := collector.NewAPICollector(cfg)
+	if err != nil {
+		return nil, fmt.Errorf("failed to create API collector: %w", err)
+	}
+	collectors[pb.SourceType_API] = apiCollector
+
+	// 网页爬虫采集器
+	webCollector, err := collector.NewWebCollector(cfg)
+	if err != nil {
+		return nil, fmt.Errorf("failed to create web collector: %w", err)
+	}
+	collectors[pb.SourceType_WEB_CRAWLER] = webCollector
+
+	// 本地文件采集器
+	fileCollector, err := collector.NewFileCollector(cfg)
+	if err != nil {
+		return nil, fmt.Errorf("failed to create file collector: %w", err)
+	}
+	collectors[pb.SourceType_LOCAL_FILE] = fileCollector
+
+	return &CollectorService{
+		config:     cfg,
+		repo:       repo,
+		collectors: collectors,
+		tasks:      make(map[string]*CollectionTask),
+	}, nil
+}
+
+func (s *CollectorService) CollectText(ctx context.Context, req *pb.CollectRequest) (*pb.CollectResponse, error) {
+	taskID := uuid.New().String()
+	
+	logrus.WithFields(logrus.Fields{
+		"task_id":     taskID,
+		"source_type": req.Source.Type,
+		"url":         req.Source.Url,
+		"file_path":   req.Source.FilePath,
+	}).Info("Starting text collection task")
+
+	// 创建任务
+	task := &CollectionTask{
+		ID:         taskID,
+		SourceType: req.Source.Type,
+		Config:     req.Config,
+		Status:     pb.CollectionStatus_COLLECTION_PENDING,
+	}
+
+	s.tasksMutex.Lock()
+	s.tasks[taskID] = task
+	s.tasksMutex.Unlock()
+
+	// 保存任务到数据库
+	dbTask := &model.CollectionTask{
+		ID:         taskID,
+		SourceType: req.Source.Type.String(),
+		SourceURL:  req.Source.Url,
+		SourceFilePath: req.Source.FilePath,
+		Status:     pb.CollectionStatus_COLLECTION_PENDING.String(),
+	}
+	
+	configBytes, _ := json.Marshal(req.Config)
+	dbTask.Config = string(configBytes)
+	
+	if err := s.repo.CreateCollectionTask(dbTask); err != nil {
+		logrus.WithError(err).Error("Failed to save collection task")
+		return nil, fmt.Errorf("failed to save collection task: %w", err)
+	}
+
+	// 异步执行采集任务
+	go s.executeCollectionTask(ctx, task, req)
+
+	return &pb.CollectResponse{
+		TaskId:         taskID,
+		Status:         pb.CollectionStatus_COLLECTION_PENDING,
+		CollectedCount: 0,
+		Message:        "Collection task started",
+	}, nil
+}
+
+func (s *CollectorService) GetCollectionStatus(ctx context.Context, req *pb.StatusRequest) (*pb.StatusResponse, error) {
+	s.tasksMutex.RLock()
+	task, exists := s.tasks[req.TaskId]
+	s.tasksMutex.RUnlock()
+
+	if !exists {
+		// 从数据库查询
+		dbTask, err := s.repo.GetCollectionTask(req.TaskId)
+		if err != nil {
+			if err == gorm.ErrRecordNotFound {
+				return nil, fmt.Errorf("task not found: %s", req.TaskId)
+			}
+			return nil, fmt.Errorf("failed to get task: %w", err)
+		}
+
+		return &pb.StatusResponse{
+			TaskId:    dbTask.ID,
+			Status:    parseCollectionStatus(dbTask.Status),
+			Progress:  dbTask.Progress,
+			Message:   dbTask.ErrorMessage,
+			StartTime: dbTask.StartTime.Unix(),
+			EndTime:   dbTask.EndTime.Unix(),
+		}, nil
+	}
+
+	resp := &pb.StatusResponse{
+		TaskId:   task.ID,
+		Status:   task.Status,
+		Progress: task.Progress,
+		Message:  task.ErrorMessage,
+	}
+
+	if task.StartTime != nil {
+		resp.StartTime = task.StartTime.Unix()
+	}
+	if task.EndTime != nil {
+		resp.EndTime = task.EndTime.Unix()
+	}
+
+	return resp, nil
+}
+
+func (s *CollectorService) executeCollectionTask(ctx context.Context, task *CollectionTask, req *pb.CollectRequest) {
+	// 创建可取消的上下文
+	taskCtx, cancel := context.WithCancel(ctx)
+	task.cancelFunc = cancel
+	defer cancel()
+
+	// 更新任务状态为运行中
+	now := time.Now()
+	task.StartTime = &now
+	task.Status = pb.CollectionStatus_COLLECTION_RUNNING
+	s.updateTaskInDB(task)
+
+	logrus.WithField("task_id", task.ID).Info("Collection task started")
+
+	// 获取对应的采集器
+	collector, exists := s.collectors[req.Source.Type]
+	if !exists {
+		s.handleTaskError(task, fmt.Errorf("unsupported source type: %v", req.Source.Type))
+		return
+	}
+
+	// 执行采集
+	textChan := make(chan *pb.RawText, 100)
+	errorChan := make(chan error, 1)
+
+	go func() {
+		defer close(textChan)
+		defer close(errorChan)
+		
+		err := collector.Collect(taskCtx, req.Source, req.Config, textChan)
+		if err != nil {
+			errorChan <- err
+		}
+	}()
+
+	// 处理采集结果
+	collectedCount := int32(0)
+	for {
+		select {
+		case text, ok := <-textChan:
+			if !ok {
+				// 采集完成
+				s.completeTask(task, collectedCount)
+				return
+			}
+			
+			// 保存文本到数据库和Kafka
+			if err := s.saveRawText(text); err != nil {
+				logrus.WithError(err).Error("Failed to save raw text")
+				continue
+			}
+			
+			collectedCount++
+			task.CollectedCount = collectedCount
+			
+			// 更新进度
+			if req.Config.MaxCount > 0 {
+				task.Progress = (collectedCount * 100) / req.Config.MaxCount
+			}
+			
+			// 定期更新数据库
+			if collectedCount%10 == 0 {
+				s.updateTaskInDB(task)
+			}
+
+		case err := <-errorChan:
+			if err != nil {
+				s.handleTaskError(task, err)
+				return
+			}
+
+		case <-taskCtx.Done():
+			s.handleTaskError(task, fmt.Errorf("task cancelled"))
+			return
+		}
+	}
+}
+
+func (s *CollectorService) saveRawText(text *pb.RawText) error {
+	// 保存到数据库
+	dbText := &model.RawText{
+		ID:        text.Id,
+		Content:   text.Content,
+		Source:    text.Source,
+		Timestamp: text.Timestamp,
+	}
+	
+	if len(text.Metadata) > 0 {
+		metadataBytes, _ := json.Marshal(text.Metadata)
+		dbText.Metadata = string(metadataBytes)
+	}
+	
+	if err := s.repo.CreateRawText(dbText); err != nil {
+		return fmt.Errorf("failed to save to database: %w", err)
+	}
+
+	// 发送到Kafka
+	if err := s.repo.PublishRawText(text); err != nil {
+		logrus.WithError(err).Error("Failed to publish to Kafka")
+		// 不返回错误，因为数据库已保存成功
+	}
+
+	return nil
+}
+
+func (s *CollectorService) completeTask(task *CollectionTask, collectedCount int32) {
+	now := time.Now()
+	task.EndTime = &now
+	task.Status = pb.CollectionStatus_COLLECTION_COMPLETED
+	task.CollectedCount = collectedCount
+	task.Progress = 100
+
+	s.updateTaskInDB(task)
+	
+	logrus.WithFields(logrus.Fields{
+		"task_id":         task.ID,
+		"collected_count": collectedCount,
+		"duration":        now.Sub(*task.StartTime),
+	}).Info("Collection task completed")
+}
+
+func (s *CollectorService) handleTaskError(task *CollectionTask, err error) {
+	now := time.Now()
+	task.EndTime = &now
+	task.Status = pb.CollectionStatus_COLLECTION_FAILED
+	task.ErrorMessage = err.Error()
+
+	s.updateTaskInDB(task)
+	
+	logrus.WithFields(logrus.Fields{
+		"task_id": task.ID,
+		"error":   err.Error(),
+	}).Error("Collection task failed")
+}
+
+func (s *CollectorService) updateTaskInDB(task *CollectionTask) {
+	dbTask := &model.CollectionTask{
+		ID:             task.ID,
+		Status:         task.Status.String(),
+		CollectedCount: int(task.CollectedCount),
+		Progress:       int(task.Progress),
+		ErrorMessage:   task.ErrorMessage,
+	}
+	
+	if task.StartTime != nil {
+		dbTask.StartTime = *task.StartTime
+	}
+	if task.EndTime != nil {
+		dbTask.EndTime = *task.EndTime
+	}
+
+	if err := s.repo.UpdateCollectionTask(dbTask); err != nil {
+		logrus.WithError(err).Error("Failed to update task in database")
+	}
+}
+
+func parseCollectionStatus(status string) pb.CollectionStatus {
+	switch status {
+	case "pending":
+		return pb.CollectionStatus_COLLECTION_PENDING
+	case "running":
+		return pb.CollectionStatus_COLLECTION_RUNNING
+	case "completed":
+		return pb.CollectionStatus_COLLECTION_COMPLETED
+	case "failed":
+		return pb.CollectionStatus_COLLECTION_FAILED
+	default:
+		return pb.CollectionStatus_COLLECTION_PENDING
+	}
+}

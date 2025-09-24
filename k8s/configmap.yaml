@@ -1,0 +1,40 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: text-audit-config
+  namespace: text-audit
+data:
+  # 数据库配置
+  DATABASE_HOST: "mysql-service"
+  DATABASE_PORT: "3306"
+  DATABASE_NAME: "text_audit"
+  DATABASE_USERNAME: "audit_user"
+  
+  # Redis配置
+  REDIS_HOST: "redis-service"
+  REDIS_PORT: "6379"
+  
+  # Kafka配置
+  KAFKA_BOOTSTRAP_SERVERS: "kafka-service:9092"
+  ZOOKEEPER_CONNECT: "zookeeper-service:2181"
+  
+  # MinIO配置
+  MINIO_ENDPOINT: "http://minio-service:9000"
+  MINIO_ACCESS_KEY: "minioadmin"
+
+---
+apiVersion: v1
+kind: Secret
+metadata:
+  name: text-audit-secrets
+  namespace: text-audit
+type: Opaque
+data:
+  # 数据库密码 (audit_pass)
+  DATABASE_PASSWORD: YXVkaXRfcGFzcw==
+  # Redis密码 (redis123)
+  REDIS_PASSWORD: cmVkaXMxMjM=
+  # MinIO密码 (minioadmin)
+  MINIO_SECRET_KEY: bWluaW9hZG1pbg==
+  # MySQL root密码 (root123)
+  MYSQL_ROOT_PASSWORD: cm9vdDEyMw==

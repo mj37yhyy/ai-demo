@@ -1,0 +1,188 @@
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: mysql-pvc
+  namespace: text-audit
+spec:
+  accessModes:
+    - ReadWriteOnce
+  resources:
+    requests:
+      storage: 10Gi
+
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: mysql
+  namespace: text-audit
+  labels:
+    app: mysql
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: mysql
+  template:
+    metadata:
+      labels:
+        app: mysql
+    spec:
+      containers:
+      - name: mysql
+        image: mysql:8.0
+        ports:
+        - containerPort: 3306
+        env:
+        - name: MYSQL_ROOT_PASSWORD
+          valueFrom:
+            secretKeyRef:
+              name: text-audit-secrets
+              key: MYSQL_ROOT_PASSWORD
+        - name: MYSQL_DATABASE
+          valueFrom:
+            configMapKeyRef:
+              name: text-audit-config
+              key: DATABASE_NAME
+        - name: MYSQL_USER
+          valueFrom:
+            configMapKeyRef:
+              name: text-audit-config
+              key: DATABASE_USER
+        - name: MYSQL_PASSWORD
+          valueFrom:
+            secretKeyRef:
+              name: text-audit-secrets
+              key: DATABASE_PASSWORD
+        volumeMounts:
+        - name: mysql-storage
+          mountPath: /var/lib/mysql
+        - name: mysql-init
+          mountPath: /docker-entrypoint-initdb.d
+        resources:
+          requests:
+            memory: "512Mi"
+            cpu: "250m"
+          limits:
+            memory: "1Gi"
+            cpu: "500m"
+        livenessProbe:
+          exec:
+            command:
+            - mysqladmin
+            - ping
+            - -h
+            - localhost
+          initialDelaySeconds: 30
+          periodSeconds: 10
+        readinessProbe:
+          exec:
+            command:
+            - mysqladmin
+            - ping
+            - -h
+            - localhost
+          initialDelaySeconds: 5
+          periodSeconds: 5
+      volumes:
+      - name: mysql-storage
+        persistentVolumeClaim:
+          claimName: mysql-pvc
+      - name: mysql-init
+        configMap:
+          name: mysql-init-config
+
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: mysql-service
+  namespace: text-audit
+  labels:
+    app: mysql
+spec:
+  selector:
+    app: mysql
+  ports:
+  - port: 3306
+    targetPort: 3306
+  type: ClusterIP
+
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: mysql-init-config
+  namespace: text-audit
+data:
+  init.sql: |
+    CREATE DATABASE IF NOT EXISTS text_audit;
+    USE text_audit;
+
+    -- 原始文本表
+    CREATE TABLE IF NOT EXISTS raw_texts (
+        id BIGINT AUTO_INCREMENT PRIMARY KEY,
+        content TEXT NOT NULL,
+        source VARCHAR(255),
+        metadata JSON,
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
+    );
+
+    -- 处理后文本表
+    CREATE TABLE IF NOT EXISTS processed_texts (
+        id BIGINT AUTO_INCREMENT PRIMARY KEY,
+        raw_text_id BIGINT,
+        processed_content TEXT NOT NULL,
+        processing_type VARCHAR(100),
+        metadata JSON,
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+        FOREIGN KEY (raw_text_id) REFERENCES raw_texts(id)
+    );
+
+    -- 模型表
+    CREATE TABLE IF NOT EXISTS models (
+        id BIGINT AUTO_INCREMENT PRIMARY KEY,
+        name VARCHAR(255) NOT NULL UNIQUE,
+        type ENUM('classification', 'regression', 'clustering', 'text_analysis') NOT NULL,
+        version VARCHAR(50) NOT NULL,
+        description TEXT,
+        file_path VARCHAR(500),
+        file_size BIGINT,
+        status ENUM('unloaded', 'loading', 'loaded', 'error') DEFAULT 'unloaded',
+        metadata JSON,
+        loaded_at TIMESTAMP NULL,
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+        deleted_at TIMESTAMP NULL
+    );
+
+    -- 推理请求表
+    CREATE TABLE IF NOT EXISTS inference_requests (
+        id BIGINT AUTO_INCREMENT PRIMARY KEY,
+        request_id VARCHAR(255) NOT NULL UNIQUE,
+        model_name VARCHAR(255) NOT NULL,
+        input_data JSON NOT NULL,
+        status ENUM('pending', 'running', 'completed', 'failed') DEFAULT 'pending',
+        result JSON,
+        error_message TEXT,
+        started_at TIMESTAMP NULL,
+        completed_at TIMESTAMP NULL,
+        duration_ms BIGINT,
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+        deleted_at TIMESTAMP NULL
+    );
+
+    -- 创建索引
+    CREATE INDEX idx_raw_texts_created_at ON raw_texts(created_at);
+    CREATE INDEX idx_processed_texts_raw_text_id ON processed_texts(raw_text_id);
+    CREATE INDEX idx_processed_texts_created_at ON processed_texts(created_at);
+    CREATE INDEX idx_models_name ON models(name);
+    CREATE INDEX idx_models_type ON models(type);
+    CREATE INDEX idx_models_status ON models(status);
+    CREATE INDEX idx_inference_requests_request_id ON inference_requests(request_id);
+    CREATE INDEX idx_inference_requests_model_name ON inference_requests(model_name);
+    CREATE INDEX idx_inference_requests_status ON inference_requests(status);
+    CREATE INDEX idx_inference_requests_created_at ON inference_requests(created_at);

@@ -1,0 +1,183 @@
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: model-data-pvc
+  namespace: text-audit
+spec:
+  accessModes:
+    - ReadWriteMany
+  resources:
+    requests:
+      storage: 20Gi
+
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: model-inference
+  namespace: text-audit
+  labels:
+    app: model-inference
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app: model-inference
+  template:
+    metadata:
+      labels:
+        app: model-inference
+    spec:
+      containers:
+      - name: model-inference
+        image: text-audit/model-inference:latest
+        ports:
+        - containerPort: 8083
+        env:
+        - name: DATABASE_HOST
+          valueFrom:
+            configMapKeyRef:
+              name: text-audit-config
+              key: DATABASE_HOST
+        - name: DATABASE_PORT
+          valueFrom:
+            configMapKeyRef:
+              name: text-audit-config
+              key: DATABASE_PORT
+        - name: DATABASE_USER
+          valueFrom:
+            configMapKeyRef:
+              name: text-audit-config
+              key: DATABASE_USER
+        - name: DATABASE_PASSWORD
+          valueFrom:
+            secretKeyRef:
+              name: text-audit-secrets
+              key: DATABASE_PASSWORD
+        - name: DATABASE_NAME
+          valueFrom:
+            configMapKeyRef:
+              name: text-audit-config
+              key: DATABASE_NAME
+        - name: REDIS_HOST
+          valueFrom:
+            configMapKeyRef:
+              name: text-audit-config
+              key: REDIS_HOST
+        - name: REDIS_PORT
+          valueFrom:
+            configMapKeyRef:
+              name: text-audit-config
+              key: REDIS_PORT
+        volumeMounts:
+        - name: model-data
+          mountPath: /app/models
+        - name: config-volume
+          mountPath: /root/config
+        resources:
+          requests:
+            memory: "512Mi"
+            cpu: "250m"
+          limits:
+            memory: "2Gi"
+            cpu: "1000m"
+        livenessProbe:
+          httpGet:
+            path: /health
+            port: 8083
+          initialDelaySeconds: 30
+          periodSeconds: 10
+        readinessProbe:
+          httpGet:
+            path: /ready
+            port: 8083
+          initialDelaySeconds: 5
+          periodSeconds: 5
+      volumes:
+      - name: model-data
+        persistentVolumeClaim:
+          claimName: model-data-pvc
+      - name: config-volume
+        configMap:
+          name: model-inference-config
+
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: model-inference-service
+  namespace: text-audit
+  labels:
+    app: model-inference
+spec:
+  selector:
+    app: model-inference
+  ports:
+  - port: 8083
+    targetPort: 8083
+  type: ClusterIP
+
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: model-inference-config
+  namespace: text-audit
+data:
+  config.yaml: |
+    # 服务器配置
+    server:
+      host: "0.0.0.0"
+      port: 8083
+      mode: "release"
+      read_timeout: 30s
+      write_timeout: 30s
+      idle_timeout: 60s
+
+    # 数据库配置
+    database:
+      host: "mysql-service"
+      port: 3306
+      user: "audit_user"
+      password: "audit_pass"
+      dbname: "text_audit"
+      charset: "utf8mb4"
+      parse_time: true
+      loc: "Local"
+      max_idle_conns: 10
+      max_open_conns: 100
+      conn_max_lifetime: 3600s
+
+    # Redis配置
+    redis:
+      host: "redis-service"
+      port: 6379
+      password: ""
+      db: 0
+      pool_size: 10
+      min_idle_conns: 5
+      dial_timeout: 5s
+      read_timeout: 3s
+      write_timeout: 3s
+      pool_timeout: 4s
+      idle_timeout: 300s
+
+    # 模型配置
+    model:
+      base_path: "/app/models"
+      max_loaded_models: 5
+      load_timeout: 300s
+      cache_ttl: 3600s
+
+    # 推理配置
+    inference:
+      max_batch_size: 100
+      timeout: 30s
+      cache_ttl: 300s
+      max_concurrent_requests: 50
+
+    # 日志配置
+    logging:
+      level: "info"
+      format: "json"
+      output: "stdout"

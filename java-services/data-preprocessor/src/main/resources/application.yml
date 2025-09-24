@@ -1,0 +1,288 @@
+server:
+  port: 8081
+  servlet:
+    context-path: /api/v1
+  compression:
+    enabled: true
+    mime-types: application/json,application/xml,text/html,text/xml,text/plain
+  tomcat:
+    max-threads: 200
+    min-spare-threads: 10
+
+spring:
+  application:
+    name: data-preprocessor
+  
+  profiles:
+    active: ${SPRING_PROFILES_ACTIVE:dev}
+  
+  # Database Configuration
+  datasource:
+    url: jdbc:mysql://${DB_HOST:localhost}:${DB_PORT:3306}/${DB_NAME:text_audit}?useUnicode=true&characterEncoding=utf8&useSSL=false&serverTimezone=Asia/Shanghai&allowPublicKeyRetrieval=true
+    username: ${DB_USERNAME:root}
+    password: ${DB_PASSWORD:password}
+    driver-class-name: com.mysql.cj.jdbc.Driver
+    hikari:
+      maximum-pool-size: 20
+      minimum-idle: 5
+      idle-timeout: 300000
+      connection-timeout: 20000
+      max-lifetime: 1200000
+      leak-detection-threshold: 60000
+  
+  # JPA Configuration
+  jpa:
+    hibernate:
+      ddl-auto: validate
+      naming:
+        physical-strategy: org.hibernate.boot.model.naming.SnakeCasePhysicalNamingStrategy
+    show-sql: false
+    properties:
+      hibernate:
+        dialect: org.hibernate.dialect.MySQL8Dialect
+        format_sql: true
+        use_sql_comments: true
+        jdbc:
+          batch_size: 50
+          order_inserts: true
+          order_updates: true
+        cache:
+          use_second_level_cache: true
+          use_query_cache: true
+          region:
+            factory_class: org.hibernate.cache.jcache.JCacheRegionFactory
+  
+  # Redis Configuration
+  data:
+    redis:
+      host: ${REDIS_HOST:localhost}
+      port: ${REDIS_PORT:6379}
+      password: ${REDIS_PASSWORD:}
+      database: ${REDIS_DB:1}
+      timeout: 2000ms
+      lettuce:
+        pool:
+          max-active: 20
+          max-idle: 10
+          min-idle: 5
+          max-wait: 2000ms
+  
+  # Kafka Configuration
+  kafka:
+    bootstrap-servers: ${KAFKA_BROKERS:localhost:9092}
+    consumer:
+      group-id: data-preprocessor-group
+      auto-offset-reset: earliest
+      key-deserializer: org.apache.kafka.common.serialization.StringDeserializer
+      value-deserializer: org.apache.kafka.common.serialization.ByteArrayDeserializer
+      max-poll-records: 100
+      fetch-min-size: 1024
+      fetch-max-wait: 500ms
+      properties:
+        session.timeout.ms: 30000
+        heartbeat.interval.ms: 3000
+    producer:
+      key-serializer: org.apache.kafka.common.serialization.StringSerializer
+      value-serializer: org.apache.kafka.common.serialization.ByteArraySerializer
+      batch-size: 16384
+      linger-ms: 5
+      buffer-memory: 33554432
+      compression-type: snappy
+      retries: 3
+      acks: all
+    streams:
+      application-id: data-preprocessor-streams
+      default-key-serde: org.apache.kafka.common.serialization.Serdes$StringSerde
+      default-value-serde: org.apache.kafka.common.serialization.Serdes$ByteArraySerde
+      num-stream-threads: 2
+      commit-interval-ms: 1000
+  
+  # Cache Configuration
+  cache:
+    type: redis
+    redis:
+      time-to-live: 3600000
+      cache-null-values: false
+  
+  # Jackson Configuration
+  jackson:
+    default-property-inclusion: non_null
+    serialization:
+      write-dates-as-timestamps: false
+      fail-on-empty-beans: false
+    deserialization:
+      fail-on-unknown-properties: false
+    time-zone: Asia/Shanghai
+
+# gRPC Configuration
+grpc:
+  server:
+    port: 9091
+    max-inbound-message-size: 4MB
+    max-inbound-metadata-size: 8KB
+    keep-alive-time: 30s
+    keep-alive-timeout: 5s
+    keep-alive-without-calls: true
+    max-connection-idle: 60s
+    max-connection-age: 30s
+    max-connection-age-grace: 5s
+    permit-keep-alive-time: 5s
+    permit-keep-alive-without-calls: false
+
+# Management Configuration
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info,metrics,prometheus
+      base-path: /actuator
+  endpoint:
+    health:
+      show-details: when-authorized
+      show-components: always
+    metrics:
+      enabled: true
+    prometheus:
+      enabled: true
+  metrics:
+    export:
+      prometheus:
+        enabled: true
+        step: 60s
+    tags:
+      application: ${spring.application.name}
+      environment: ${spring.profiles.active}
+
+# Logging Configuration
+logging:
+  level:
+    root: INFO
+    com.textaudit: DEBUG
+    org.springframework.kafka: INFO
+    org.hibernate.SQL: DEBUG
+    org.hibernate.type.descriptor.sql.BasicBinder: TRACE
+  pattern:
+    console: "%d{yyyy-MM-dd HH:mm:ss.SSS} [%thread] %-5level [%logger{36}] - %msg%n"
+    file: "%d{yyyy-MM-dd HH:mm:ss.SSS} [%thread] %-5level [%logger{36}] - %msg%n"
+  file:
+    name: logs/data-preprocessor.log
+    max-size: 100MB
+    max-history: 30
+
+# Custom Application Configuration
+app:
+  # Text Processing Configuration
+  text-processing:
+    # 分词配置
+    tokenization:
+      enabled: true
+      language: zh
+      custom-dict-path: /app/data/custom_dict.txt
+      stop-words-path: /app/data/stop_words.txt
+      min-word-length: 1
+      max-word-length: 20
+    
+    # 文本清洗配置
+    cleaning:
+      enabled: true
+      remove-html: true
+      remove-urls: true
+      remove-emails: true
+      remove-phone-numbers: true
+      remove-special-chars: true
+      normalize-whitespace: true
+      convert-to-lowercase: false
+      remove-duplicates: true
+      min-text-length: 10
+      max-text-length: 10000
+    
+    # 特征提取配置
+    feature-extraction:
+      enabled: true
+      # TF-IDF配置
+      tfidf:
+        enabled: true
+        max-features: 10000
+        min-df: 2
+        max-df: 0.95
+        ngram-range: [1, 2]
+      # Word2Vec配置
+      word2vec:
+        enabled: true
+        vector-size: 300
+        window-size: 5
+        min-count: 5
+        workers: 4
+        epochs: 10
+      # 统计特征
+      statistical:
+        enabled: true
+        include-length: true
+        include-word-count: true
+        include-sentence-count: true
+        include-punctuation-count: true
+        include-digit-count: true
+        include-uppercase-count: true
+    
+    # 数据增强配置
+    augmentation:
+      enabled: false
+      synonym-replacement: 0.1
+      random-insertion: 0.1
+      random-swap: 0.1
+      random-deletion: 0.1
+  
+  # Kafka Topics
+  kafka:
+    topics:
+      raw-text: text-audit.raw-text
+      processed-text: text-audit.processed-text
+      audit-request: text-audit.audit-request
+      model-update: text-audit.model-update
+      system-event: text-audit.system-event
+  
+  # Processing Configuration
+  processing:
+    batch-size: 100
+    max-concurrent-tasks: 10
+    task-timeout: 300000
+    retry-attempts: 3
+    retry-delay: 5000
+  
+  # Model Configuration
+  model:
+    cache-size: 1000
+    cache-ttl: 3600000
+    model-path: /app/models
+    temp-path: /app/temp
+
+---
+# Development Profile
+spring:
+  config:
+    activate:
+      on-profile: dev
+  jpa:
+    show-sql: true
+    properties:
+      hibernate:
+        format_sql: true
+
+logging:
+  level:
+    com.textaudit: DEBUG
+    org.springframework.kafka: DEBUG
+
+---
+# Production Profile
+spring:
+  config:
+    activate:
+      on-profile: prod
+  jpa:
+    show-sql: false
+
+logging:
+  level:
+    root: WARN
+    com.textaudit: INFO
