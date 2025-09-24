@@ -12,8 +12,8 @@ import (
 	"github.com/google/uuid"
 	"github.com/sirupsen/logrus"
 
-	"github.com/text-audit/data-collector/internal/config"
-	pb "github.com/text-audit/data-collector/proto"
+	"github.com/mj37yhyy/ai-demo/go-services/data-collector/internal/config"
+	pb "github.com/mj37yhyy/ai-demo/go-services/data-collector/proto"
 )
 
 type WebCollector struct {
@@ -287,13 +287,4 @@ func isOnlyNumbersOrSymbols(text string) bool {
 		}
 	}
 	return true
-}
-
-func containsChinese(text string) bool {
-	for _, r := range text {
-		if r >= 0x4e00 && r <= 0x9fff {
-			return true
-		}
-	}
-	return false
 }

@@ -14,8 +14,8 @@ import (
 	"github.com/sirupsen/logrus"
 	"golang.org/x/time/rate"
 
-	"github.com/text-audit/data-collector/internal/config"
-	pb "github.com/text-audit/data-collector/proto"
+	"github.com/mj37yhyy/ai-demo/go-services/data-collector/internal/config"
+	pb "github.com/mj37yhyy/ai-demo/go-services/data-collector/proto"
 )
 
 type APICollector struct {

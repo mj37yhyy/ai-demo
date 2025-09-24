@@ -113,28 +113,31 @@ services:
       dockerfile: Dockerfile
     container_name: text-audit-data-collector
     environment:
-      - DATABASE_HOST=mysql
-      - DATABASE_PORT=3306
-      - DATABASE_USER=audit_user
-      - DATABASE_PASSWORD=audit_pass
-      - DATABASE_NAME=text_audit
-      - REDIS_HOST=redis
-      - REDIS_PORT=6379
+      - CONFIG_PATH=/app/config.yaml
+      - DB_HOST=mysql
+      - DB_PORT=3306
+      - DB_USERNAME=audit_user
+      - DB_PASSWORD=audit_pass
+      - DB_DATABASE=text_audit
+      - REDIS_ADDRESS=redis:6379
       - KAFKA_BROKERS=kafka:9092
       - MINIO_ENDPOINT=minio:9000
       - MINIO_ACCESS_KEY=minioadmin
       - MINIO_SECRET_KEY=minioadmin123
     ports:
-      - "8081:8081"
+      - "8080:8080"
+      - "9090:9090"
     depends_on:
       - mysql
       - redis
       - kafka
       - minio
     volumes:
-      - ./go-services/data-collector/config:/app/config
+      - ./go-services/data-collector/config.yaml:/app/config.yaml
+      - ./go-services/data-collector/logs:/app/logs
     networks:
       - text-audit-network
+    restart: unless-stopped
 
   # 数据预处理服务 (Java)
   data-preprocessor:
@@ -197,13 +200,13 @@ services:
       dockerfile: Dockerfile
     container_name: text-audit-model-inference
     environment:
-      - DATABASE_HOST=mysql
-      - DATABASE_PORT=3306
-      - DATABASE_USER=audit_user
-      - DATABASE_PASSWORD=audit_pass
-      - DATABASE_NAME=text_audit
-      - REDIS_HOST=redis
-      - REDIS_PORT=6379
+      - TEXTAUDIT_DATABASE_HOST=mysql
+      - TEXTAUDIT_DATABASE_PORT=3306
+      - TEXTAUDIT_DATABASE_USER=audit_user
+      - TEXTAUDIT_DATABASE_PASSWORD=audit_pass
+      - TEXTAUDIT_DATABASE_DBNAME=text_audit
+      - TEXTAUDIT_REDIS_HOST=redis
+      - TEXTAUDIT_REDIS_PORT=6379
     ports:
       - "8083:8083"
     depends_on:

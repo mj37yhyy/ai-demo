@@ -10,9 +10,9 @@ import (
 	"github.com/google/uuid"
 	"github.com/sirupsen/logrus"
 
-	"github.com/textaudit/model-inference/internal/config"
-	"github.com/textaudit/model-inference/internal/model"
-	"github.com/textaudit/model-inference/internal/repository"
+	"github.com/mj37yhyy/ai-demo/go-services/model-inference/internal/config"
+	"github.com/mj37yhyy/ai-demo/go-services/model-inference/internal/model"
+	"github.com/mj37yhyy/ai-demo/go-services/model-inference/internal/repository"
 )
 
 // InferenceService 推理服务接口

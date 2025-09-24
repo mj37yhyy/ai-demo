@@ -8,8 +8,8 @@ import (
 	"gorm.io/gorm"
 	"gorm.io/gorm/logger"
 
-	"github.com/textaudit/model-inference/internal/config"
-	"github.com/textaudit/model-inference/internal/model"
+	"github.com/mj37yhyy/ai-demo/go-services/model-inference/internal/config"
+	"github.com/mj37yhyy/ai-demo/go-services/model-inference/internal/model"
 )
 
 // NewDatabase 创建数据库连接

@@ -5,7 +5,7 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/text-audit/data-collector/internal/model"
+	"github.com/mj37yhyy/ai-demo/go-services/data-collector/internal/model"
 	"gorm.io/driver/mysql"
 	"gorm.io/gorm"
 	"gorm.io/gorm/logger"
@@ -24,6 +24,7 @@ type Repository interface {
 	UpdateCollectionTask(ctx context.Context, task *model.CollectionTask) error
 	GetCollectionTaskByID(ctx context.Context, id string) (*model.CollectionTask, error)
 	ListCollectionTasks(ctx context.Context, status string, limit, offset int) ([]*model.CollectionTask, error)
+	CountCollectionTasks(ctx context.Context, status string) (int64, error)
 	UpdateTaskProgress(ctx context.Context, taskID string, progress int, collectedCount int) error
 	UpdateTaskStatus(ctx context.Context, taskID string, status string, errorMessage string) error
 
@@ -158,6 +159,16 @@ func (r *MySQLRepository) ListCollectionTasks(ctx context.Context, status string
 	}
 	err := query.Order("created_at DESC").Limit(limit).Offset(offset).Find(&tasks).Error
 	return tasks, err
+}
+
+func (r *MySQLRepository) CountCollectionTasks(ctx context.Context, status string) (int64, error) {
+	var count int64
+	query := r.db.WithContext(ctx).Model(&model.CollectionTask{})
+	if status != "" {
+		query = query.Where("status = ?", status)
+	}
+	err := query.Count(&count).Error
+	return count, err
 }
 
 func (r *MySQLRepository) UpdateTaskProgress(ctx context.Context, taskID string, progress int, collectedCount int) error {

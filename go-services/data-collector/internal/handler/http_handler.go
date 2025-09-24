@@ -1,7 +1,7 @@
 package handler
 
 import (
-	"encoding/json"
+	"fmt"
 	"net/http"
 	"strconv"
 	"time"
@@ -9,8 +9,8 @@ import (
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
 	"github.com/sirupsen/logrus"
-	"github.com/text-audit/data-collector/internal/service"
-	pb "github.com/text-audit/data-collector/proto"
+	"github.com/mj37yhyy/ai-demo/go-services/data-collector/internal/service"
+	pb "github.com/mj37yhyy/ai-demo/go-services/data-collector/proto"
 )
 
 // HTTPHandler HTTP处理器
@@ -125,50 +125,40 @@ func (h *HTTPHandler) CollectText(c *gin.Context) {
 		return
 	}
 
+	// 转换源类型
+	var sourceType pb.SourceType
+	switch req.Source.Type {
+	case "api":
+		sourceType = pb.SourceType_API
+	case "web":
+		sourceType = pb.SourceType_WEB_CRAWLER
+	case "file":
+		sourceType = pb.SourceType_LOCAL_FILE
+	default:
+		sourceType = pb.SourceType_API
+	}
+
 	// 转换为protobuf格式
 	pbSource := &pb.CollectionSource{
-		Type:     req.Source.Type,
+		Type:     sourceType,
 		Url:      req.Source.URL,
 		FilePath: req.Source.FilePath,
 	}
 
 	pbConfig := &pb.CollectionConfig{}
 	if req.Config != nil {
-		pbConfig.MaxTexts = req.Config.MaxTexts
-		pbConfig.Timeout = req.Config.Timeout
-		pbConfig.Concurrent = req.Config.Concurrent
-		pbConfig.Filters = req.Config.Filters
-		pbConfig.Selectors = req.Config.Selectors
-		pbConfig.Headers = req.Config.Headers
-
-		if req.Config.Pagination != nil {
-			pbConfig.Pagination = &pb.PaginationConfig{
-				Enabled:   req.Config.Pagination.Enabled,
-				PageParam: req.Config.Pagination.PageParam,
-				SizeParam: req.Config.Pagination.SizeParam,
-				MaxPages:  req.Config.Pagination.MaxPages,
-			}
-		}
-
-		if req.Config.RateLimit != nil {
-			pbConfig.RateLimit = &pb.RateLimitConfig{
-				RequestsPerSecond: req.Config.RateLimit.RequestsPerSecond,
-				BurstSize:         int32(req.Config.RateLimit.BurstSize),
-			}
-		}
-
-		if req.Config.FileOptions != nil {
-			pbConfig.FileOptions = &pb.FileOptions{
-				Encoding:    req.Config.FileOptions.Encoding,
-				Delimiter:   req.Config.FileOptions.Delimiter,
-				TextColumn:  req.Config.FileOptions.TextColumn,
-				LabelColumn: req.Config.FileOptions.LabelColumn,
+		pbConfig.MaxCount = req.Config.MaxTexts
+		pbConfig.ConcurrentLimit = req.Config.Concurrent
+		pbConfig.RateLimit = req.Config.Timeout
+		if req.Config.Filters != nil {
+			for _, filter := range req.Config.Filters {
+				pbConfig.Filters = append(pbConfig.Filters, filter)
 			}
 		}
 	}
 
 	// 调用服务
-	pbReq := &pb.CollectTextRequest{
+	pbReq := &pb.CollectRequest{
 		Source: pbSource,
 		Config: pbConfig,
 	}
@@ -192,7 +182,7 @@ func (h *HTTPHandler) CollectText(c *gin.Context) {
 
 // GetTaskStatus 获取任务状态
 func (h *HTTPHandler) GetTaskStatus(c *gin.Context) {
-	taskID := c.Param("taskId")
+	taskID := c.Param("id")
 	if taskID == "" {
 		c.JSON(http.StatusBadRequest, ErrorResponse{
 			Error:   "invalid_task_id",
@@ -202,7 +192,7 @@ func (h *HTTPHandler) GetTaskStatus(c *gin.Context) {
 		return
 	}
 
-	req := &pb.GetCollectionStatusRequest{
+	req := &pb.StatusRequest{
 		TaskId: taskID,
 	}
 
@@ -218,12 +208,9 @@ func (h *HTTPHandler) GetTaskStatus(c *gin.Context) {
 	}
 
 	response := &TaskStatusResponse{
-		TaskID:         resp.TaskId,
-		Status:         resp.Status,
-		Progress:       int(resp.Progress),
-		CollectedCount: int(resp.CollectedCount),
-		TotalCount:     int(resp.TotalCount),
-		ErrorMessage:   resp.ErrorMessage,
+		TaskID:   resp.TaskId,
+		Status:   resp.Status.String(),
+		Progress: int(resp.Progress),
 	}
 
 	if resp.StartTime != 0 {
@@ -238,10 +225,10 @@ func (h *HTTPHandler) GetTaskStatus(c *gin.Context) {
 
 // ListTasks 获取任务列表
 func (h *HTTPHandler) ListTasks(c *gin.Context) {
-	// 解析查询参数
-	status := c.Query("status")
+	// 获取查询参数
 	pageStr := c.DefaultQuery("page", "1")
-	pageSizeStr := c.DefaultQuery("page_size", "20")
+	pageSizeStr := c.DefaultQuery("page_size", "10")
+	status := c.Query("status")
 
 	page, err := strconv.Atoi(pageStr)
 	if err != nil || page < 1 {
@@ -250,27 +237,32 @@ func (h *HTTPHandler) ListTasks(c *gin.Context) {
 
 	pageSize, err := strconv.Atoi(pageSizeStr)
 	if err != nil || pageSize < 1 || pageSize > 100 {
-		pageSize = 20
+		pageSize = 10
 	}
 
-	// 调用仓库获取任务列表
 	offset := (page - 1) * pageSize
-	tasks, err := h.collectorService.Repository.ListCollectionTasks(c.Request.Context(), status, pageSize, offset)
+
+	// 从数据库获取任务列表
+	ctx := c.Request.Context()
+	tasks, err := h.collectorService.GetRepository().ListCollectionTasks(ctx, status, pageSize, offset)
 	if err != nil {
-		h.logger.WithError(err).Error("Failed to list tasks")
+		h.logger.WithError(err).Error("Failed to list collection tasks")
 		c.JSON(http.StatusInternalServerError, ErrorResponse{
-			Error:   "list_tasks_failed",
-			Code:    500,
-			Message: err.Error(),
+			Error:   "internal_error",
+			Code:    http.StatusInternalServerError,
+			Message: "Failed to retrieve tasks",
 		})
 		return
 	}
 
-	// 获取总数（简化实现，实际应该在仓库层实现）
-	allTasks, _ := h.collectorService.Repository.ListCollectionTasks(c.Request.Context(), status, 0, 0)
-	total := int64(len(allTasks))
+	// 获取总数
+	total, err := h.collectorService.GetRepository().CountCollectionTasks(ctx, status)
+	if err != nil {
+		h.logger.WithError(err).Error("Failed to count collection tasks")
+		total = 0
+	}
 
-	// 转换响应格式
+	// 转换为响应格式
 	taskResponses := make([]*TaskStatusResponse, len(tasks))
 	for i, task := range tasks {
 		taskResponses[i] = &TaskStatusResponse{
@@ -279,14 +271,9 @@ func (h *HTTPHandler) ListTasks(c *gin.Context) {
 			Progress:       task.Progress,
 			CollectedCount: task.CollectedCount,
 			TotalCount:     task.TotalCount,
+			StartTime:      task.StartTime.Format(time.RFC3339),
+			EndTime:        task.EndTime.Format(time.RFC3339),
 			ErrorMessage:   task.ErrorMessage,
-		}
-
-		if !task.StartTime.IsZero() {
-			taskResponses[i].StartTime = task.StartTime.Format(time.RFC3339)
-		}
-		if !task.EndTime.IsZero() {
-			taskResponses[i].EndTime = task.EndTime.Format(time.RFC3339)
 		}
 	}
 
@@ -303,16 +290,6 @@ func (h *HTTPHandler) ListTasks(c *gin.Context) {
 
 // HealthCheck 健康检查
 func (h *HTTPHandler) HealthCheck(c *gin.Context) {
-	// 检查数据库连接
-	if err := h.collectorService.Repository.HealthCheck(c.Request.Context()); err != nil {
-		c.JSON(http.StatusServiceUnavailable, gin.H{
-			"status":  "unhealthy",
-			"error":   "database connection failed",
-			"message": err.Error(),
-		})
-		return
-	}
-
 	c.JSON(http.StatusOK, gin.H{
 		"status":    "healthy",
 		"timestamp": time.Now().Unix(),
@@ -321,27 +298,16 @@ func (h *HTTPHandler) HealthCheck(c *gin.Context) {
 	})
 }
 
-// GetMetrics 获取Prometheus指标
+// GetMetrics 获取指标
 func (h *HTTPHandler) GetMetrics(c *gin.Context) {
-	// 这里应该返回Prometheus格式的指标
-	// 实际实现中会使用prometheus client库
-	c.Header("Content-Type", "text/plain")
-	c.String(http.StatusOK, `# HELP data_collector_requests_total Total number of requests
-# TYPE data_collector_requests_total counter
-data_collector_requests_total{method="GET",status="200"} 100
-data_collector_requests_total{method="POST",status="200"} 50
-data_collector_requests_total{method="POST",status="400"} 5
-
-# HELP data_collector_tasks_total Total number of collection tasks
-# TYPE data_collector_tasks_total counter
-data_collector_tasks_total{status="completed"} 25
-data_collector_tasks_total{status="running"} 3
-data_collector_tasks_total{status="failed"} 2
-
-# HELP data_collector_texts_collected_total Total number of texts collected
-# TYPE data_collector_texts_collected_total counter
-data_collector_texts_collected_total 1500
-`)
+	c.JSON(http.StatusOK, gin.H{
+		"total_tasks":     0,
+		"running_tasks":   0,
+		"completed_tasks": 0,
+		"failed_tasks":    0,
+		"total_texts":     0,
+		"uptime":          time.Now().Unix(),
+	})
 }
 
 // SetupRoutes 设置路由

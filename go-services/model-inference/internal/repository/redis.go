@@ -7,7 +7,7 @@ import (
 
 	"github.com/go-redis/redis/v8"
 
-	"github.com/textaudit/model-inference/internal/config"
+	"github.com/mj37yhyy/ai-demo/go-services/model-inference/internal/config"
 )
 
 // NewRedisClient 创建Redis客户端

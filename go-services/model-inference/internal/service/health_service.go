@@ -7,7 +7,7 @@ import (
 	"github.com/go-redis/redis/v8"
 	"gorm.io/gorm"
 
-	"github.com/textaudit/model-inference/internal/model"
+	"github.com/mj37yhyy/ai-demo/go-services/model-inference/internal/model"
 )
 
 // HealthService 健康检查服务接口

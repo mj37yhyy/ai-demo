@@ -7,8 +7,8 @@ import (
 	"github.com/gin-gonic/gin"
 	"github.com/sirupsen/logrus"
 
-	"github.com/textaudit/model-inference/internal/model"
-	"github.com/textaudit/model-inference/internal/service"
+	"github.com/mj37yhyy/ai-demo/go-services/model-inference/internal/model"
+	"github.com/mj37yhyy/ai-demo/go-services/model-inference/internal/service"
 )
 
 // ModelHandler 模型处理器
@@ -31,26 +31,36 @@ func NewModelHandler(modelService service.ModelService, logger *logrus.Logger) *
 // @Tags 模型管理
 // @Accept json
 // @Produce json
-// @Param request body model.ModelLoadRequest true "模型加载请求"
+// @Param name path string true "模型名称"
+// @Param request body model.ModelLoadRequest true "加载请求"
 // @Success 200 {object} model.ModelStatusResponse
 // @Failure 400 {object} model.ErrorResponse
 // @Failure 500 {object} model.ErrorResponse
-// @Router /api/v1/models/load [post]
+// @Router /models/{name}/load [post]
 func (h *ModelHandler) LoadModel(c *gin.Context) {
+	modelName := c.Param("name")
+	if modelName == "" {
+		c.JSON(http.StatusBadRequest, model.ErrorResponse{
+			Error:   "模型名称不能为空",
+			Message: "model name is required",
+		})
+		return
+	}
+
 	var req model.ModelLoadRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
-		h.logger.WithError(err).Error("绑定请求参数失败")
+		h.logger.WithError(err).Error("解析请求参数失败")
 		c.JSON(http.StatusBadRequest, model.ErrorResponse{
-			Error:   "无效的请求参数",
+			Error:   "请求参数错误",
 			Message: err.Error(),
 		})
 		return
 	}
 
 	// 加载模型
-	modelInfo, err := h.modelService.LoadModel(c.Request.Context(), req.ModelName)
+	err := h.modelService.LoadModel(c.Request.Context(), modelName, req.Force)
 	if err != nil {
-		h.logger.WithError(err).WithField("model_name", req.ModelName).Error("加载模型失败")
+		h.logger.WithError(err).WithField("model_name", modelName).Error("加载模型失败")
 		c.JSON(http.StatusInternalServerError, model.ErrorResponse{
 			Error:   "加载模型失败",
 			Message: err.Error(),
@@ -58,14 +68,18 @@ func (h *ModelHandler) LoadModel(c *gin.Context) {
 		return
 	}
 
-	c.JSON(http.StatusOK, model.ModelStatusResponse{
-		ModelName:   modelInfo.Name,
-		Status:      string(modelInfo.Status),
-		LoadedAt:    modelInfo.LoadedAt,
-		Description: modelInfo.Description,
-		Version:     modelInfo.Version,
-		Type:        string(modelInfo.Type),
-	})
+	// 获取模型状态
+	status, err := h.modelService.GetModelStatus(c.Request.Context(), modelName)
+	if err != nil {
+		h.logger.WithError(err).WithField("model_name", modelName).Error("获取模型状态失败")
+		c.JSON(http.StatusInternalServerError, model.ErrorResponse{
+			Error:   "获取模型状态失败",
+			Message: err.Error(),
+		})
+		return
+	}
+
+	c.JSON(http.StatusOK, status)
 }
 
 // UnloadModel 卸载模型
@@ -101,8 +115,8 @@ func (h *ModelHandler) UnloadModel(c *gin.Context) {
 	}
 
 	c.JSON(http.StatusOK, model.ModelStatusResponse{
-		ModelName: modelName,
-		Status:    "unloaded",
+		Name:   modelName,
+		Status: model.ModelStatusUnloaded,
 	})
 }
 
@@ -229,10 +243,7 @@ func (h *ModelHandler) GetModelStatus(c *gin.Context) {
 		return
 	}
 
-	c.JSON(http.StatusOK, model.ModelStatusResponse{
-		ModelName: modelName,
-		Status:    string(status),
-	})
+	c.JSON(http.StatusOK, status)
 }
 
 // GetModelStatistics 获取模型统计信息
@@ -246,7 +257,7 @@ func (h *ModelHandler) GetModelStatus(c *gin.Context) {
 // @Router /api/v1/models/statistics [get]
 func (h *ModelHandler) GetModelStatistics(c *gin.Context) {
 	// 获取模型统计信息
-	stats, err := h.modelService.GetModelStatistics(c.Request.Context())
+	stats, err := h.modelService.GetStatistics(c.Request.Context())
 	if err != nil {
 		h.logger.WithError(err).Error("获取模型统计信息失败")
 		c.JSON(http.StatusInternalServerError, model.ErrorResponse{

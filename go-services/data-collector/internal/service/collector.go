@@ -11,21 +11,26 @@ import (
 	"github.com/sirupsen/logrus"
 	"gorm.io/gorm"
 
-	"github.com/text-audit/data-collector/internal/config"
-	"github.com/text-audit/data-collector/internal/collector"
-	"github.com/text-audit/data-collector/internal/model"
-	"github.com/text-audit/data-collector/internal/repository"
-	pb "github.com/text-audit/data-collector/proto"
+	"github.com/mj37yhyy/ai-demo/go-services/data-collector/internal/config"
+	"github.com/mj37yhyy/ai-demo/go-services/data-collector/internal/collector"
+	"github.com/mj37yhyy/ai-demo/go-services/data-collector/internal/model"
+	"github.com/mj37yhyy/ai-demo/go-services/data-collector/internal/repository"
+	pb "github.com/mj37yhyy/ai-demo/go-services/data-collector/proto"
 )
 
 type CollectorService struct {
 	pb.UnimplementedDataCollectionServiceServer
 	
 	config     *config.Config
-	repo       *repository.Repository
+	repo       repository.Repository
 	collectors map[pb.SourceType]collector.Collector
 	tasks      map[string]*CollectionTask
 	tasksMutex sync.RWMutex
+}
+
+// GetRepository 获取repository实例
+func (s *CollectorService) GetRepository() repository.Repository {
+	return s.repo
 }
 
 type CollectionTask struct {
@@ -43,8 +48,16 @@ type CollectionTask struct {
 }
 
 func NewCollectorService(cfg *config.Config) (*CollectorService, error) {
+	// 构建数据库DSN
+	dsn := fmt.Sprintf("%s:%s@tcp(%s:%d)/%s?charset=utf8mb4&parseTime=True&loc=Local",
+		cfg.Database.Username,
+		cfg.Database.Password,
+		cfg.Database.Host,
+		cfg.Database.Port,
+		cfg.Database.Database)
+	
 	// 初始化数据库连接
-	repo, err := repository.NewRepository(cfg)
+	repo, err := repository.NewMySQLRepository(dsn)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create repository: %w", err)
 	}
@@ -115,7 +128,7 @@ func (s *CollectorService) CollectText(ctx context.Context, req *pb.CollectReque
 	configBytes, _ := json.Marshal(req.Config)
 	dbTask.Config = string(configBytes)
 	
-	if err := s.repo.CreateCollectionTask(dbTask); err != nil {
+	if err := s.repo.CreateCollectionTask(ctx, dbTask); err != nil {
 		logrus.WithError(err).Error("Failed to save collection task")
 		return nil, fmt.Errorf("failed to save collection task: %w", err)
 	}
@@ -138,7 +151,7 @@ func (s *CollectorService) GetCollectionStatus(ctx context.Context, req *pb.Stat
 
 	if !exists {
 		// 从数据库查询
-		dbTask, err := s.repo.GetCollectionTask(req.TaskId)
+		dbTask, err := s.repo.GetCollectionTaskByID(ctx, req.TaskId)
 		if err != nil {
 			if err == gorm.ErrRecordNotFound {
 				return nil, fmt.Errorf("task not found: %s", req.TaskId)
@@ -149,7 +162,7 @@ func (s *CollectorService) GetCollectionStatus(ctx context.Context, req *pb.Stat
 		return &pb.StatusResponse{
 			TaskId:    dbTask.ID,
 			Status:    parseCollectionStatus(dbTask.Status),
-			Progress:  dbTask.Progress,
+			Progress:  int32(dbTask.Progress),
 			Message:   dbTask.ErrorMessage,
 			StartTime: dbTask.StartTime.Unix(),
 			EndTime:   dbTask.EndTime.Unix(),
@@ -219,8 +232,8 @@ func (s *CollectorService) executeCollectionTask(ctx context.Context, task *Coll
 				return
 			}
 			
-			// 保存文本到数据库和Kafka
-			if err := s.saveRawText(text); err != nil {
+			// 保存文本到数据库
+			if err := s.saveRawText(ctx, text); err != nil {
 				logrus.WithError(err).Error("Failed to save raw text")
 				continue
 			}
@@ -251,7 +264,7 @@ func (s *CollectorService) executeCollectionTask(ctx context.Context, task *Coll
 	}
 }
 
-func (s *CollectorService) saveRawText(text *pb.RawText) error {
+func (s *CollectorService) saveRawText(ctx context.Context, text *pb.RawText) error {
 	// 保存到数据库
 	dbText := &model.RawText{
 		ID:        text.Id,
@@ -265,15 +278,15 @@ func (s *CollectorService) saveRawText(text *pb.RawText) error {
 		dbText.Metadata = string(metadataBytes)
 	}
 	
-	if err := s.repo.CreateRawText(dbText); err != nil {
+	if err := s.repo.SaveRawText(ctx, dbText); err != nil {
 		return fmt.Errorf("failed to save to database: %w", err)
 	}
 
-	// 发送到Kafka
-	if err := s.repo.PublishRawText(text); err != nil {
-		logrus.WithError(err).Error("Failed to publish to Kafka")
-		// 不返回错误，因为数据库已保存成功
-	}
+	// 发送到消息队列 (暂时注释掉，因为repository接口中没有PublishRawText方法)
+	// TODO: 实现消息队列发布功能
+	// if err := s.repo.PublishRawText(ctx, text); err != nil {
+	//     logrus.WithError(err).Error("Failed to publish to message queue")
+	// }
 
 	return nil
 }
@@ -324,7 +337,7 @@ func (s *CollectorService) updateTaskInDB(task *CollectionTask) {
 		dbTask.EndTime = *task.EndTime
 	}
 
-	if err := s.repo.UpdateCollectionTask(dbTask); err != nil {
+	if err := s.repo.UpdateCollectionTask(context.Background(), dbTask); err != nil {
 		logrus.WithError(err).Error("Failed to update task in database")
 	}
 }

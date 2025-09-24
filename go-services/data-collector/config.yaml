@@ -1,0 +1,39 @@
+# Data Collector Service Configuration
+
+# HTTP Server Configuration
+http:
+  address: ":8080"
+
+# gRPC Server Configuration
+grpc:
+  address: ":9090"
+
+# Database Configuration
+database:
+  host: "mysql"
+  port: 3306
+  username: "audit_user"
+  password: "audit_pass"
+  database: "text_audit"
+
+# Redis Configuration
+redis:
+  address: "redis:6379"
+  password: ""
+  db: 0
+
+# Kafka Configuration
+kafka:
+  brokers:
+    - "kafka:9092"
+  raw_topic: "raw_text"
+
+# Collector Configuration
+collector:
+  rate_limit: 100
+  concurrent_limit: 10
+  timeout: 30s
+  user_agents:
+    - "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"
+    - "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36"
+  proxy_urls: []

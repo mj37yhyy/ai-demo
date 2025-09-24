@@ -11,16 +11,14 @@ import (
 
 	"github.com/gin-gonic/gin"
 	"github.com/sirupsen/logrus"
-	"github.com/spf13/viper"
 	swaggerFiles "github.com/swaggo/files"
 	ginSwagger "github.com/swaggo/gin-swagger"
 
-	"github.com/textaudit/model-inference/internal/config"
-	"github.com/textaudit/model-inference/internal/handler"
-	"github.com/textaudit/model-inference/internal/middleware"
-	"github.com/textaudit/model-inference/internal/repository"
-	"github.com/textaudit/model-inference/internal/service"
-	_ "github.com/textaudit/model-inference/docs"
+	"github.com/mj37yhyy/ai-demo/go-services/model-inference/internal/config"
+	"github.com/mj37yhyy/ai-demo/go-services/model-inference/internal/handler"
+	"github.com/mj37yhyy/ai-demo/go-services/model-inference/internal/middleware"
+	"github.com/mj37yhyy/ai-demo/go-services/model-inference/internal/repository"
+	"github.com/mj37yhyy/ai-demo/go-services/model-inference/internal/service"
 )
 
 // @title TextAudit 模型推理服务 API
@@ -82,10 +80,14 @@ func main() {
 	inferenceService := service.NewInferenceService(inferenceRepo, modelService, cacheRepo, cfg.Inference)
 	healthService := service.NewHealthService(db, redisClient)
 
+	// 初始化日志
+	logger := logrus.New()
+	logger.SetLevel(logrus.InfoLevel)
+
 	// 初始化处理器
-	modelHandler := handler.NewModelHandler(modelService)
-	inferenceHandler := handler.NewInferenceHandler(inferenceService)
-	healthHandler := handler.NewHealthHandler(healthService)
+	modelHandler := handler.NewModelHandler(modelService, logger)
+	inferenceHandler := handler.NewInferenceHandler(inferenceService, logger)
+	healthHandler := handler.NewHealthHandler(healthService, logger)
 
 	// 设置Gin模式
 	if cfg.Server.Mode == "release" {
@@ -96,8 +98,8 @@ func main() {
 	router := gin.New()
 
 	// 添加中间件
-	router.Use(middleware.Logger())
-	router.Use(middleware.Recovery())
+	router.Use(middleware.Logger(logger))
+	router.Use(middleware.Recovery(logger))
 	router.Use(middleware.CORS())
 	router.Use(middleware.RequestID())
 
@@ -116,7 +118,7 @@ func main() {
 			models.POST("/:name/load", modelHandler.LoadModel)
 			models.POST("/:name/unload", modelHandler.UnloadModel)
 			models.GET("/:name/status", modelHandler.GetModelStatus)
-			models.GET("/statistics", modelHandler.GetStatistics)
+			models.GET("/statistics", modelHandler.GetModelStatistics)
 		}
 
 		// 推理服务
@@ -124,18 +126,18 @@ func main() {
 		{
 			inference.POST("/predict", inferenceHandler.Predict)
 			inference.POST("/batch-predict", inferenceHandler.BatchPredict)
-			inference.GET("/history", inferenceHandler.GetHistory)
+			inference.GET("/history", inferenceHandler.GetInferenceHistory)
 			inference.GET("/history/:id", inferenceHandler.GetInferenceResult)
-			inference.GET("/statistics", inferenceHandler.GetStatistics)
+			inference.GET("/statistics", inferenceHandler.GetInferenceStatistics)
 		}
 
 		// 文本分析
 		textAnalysis := v1.Group("/text-analysis")
 		{
-			textAnalysis.POST("/classify", inferenceHandler.ClassifyText)
-			textAnalysis.POST("/sentiment", inferenceHandler.AnalyzeSentiment)
-			textAnalysis.POST("/extract-features", inferenceHandler.ExtractFeatures)
-			textAnalysis.POST("/detect-anomaly", inferenceHandler.DetectAnomaly)
+			textAnalysis.POST("/classify", inferenceHandler.TextClassify)
+			textAnalysis.POST("/sentiment", inferenceHandler.SentimentAnalysis)
+			textAnalysis.POST("/extract-features", inferenceHandler.FeatureExtraction)
+			textAnalysis.POST("/detect-anomaly", inferenceHandler.AnomalyDetection)
 		}
 	}
 
@@ -144,8 +146,8 @@ func main() {
 		router.GET("/swagger/*any", ginSwagger.WrapHandler(swaggerFiles.Handler))
 	}
 
-	// 指标端点
-	router.GET("/metrics", middleware.PrometheusHandler())
+	// 指标端点 - 暂时注释掉，因为PrometheusHandler未实现
+	// router.GET("/metrics", middleware.PrometheusHandler())
 
 	// 创建HTTP服务器
 	server := &http.Server{

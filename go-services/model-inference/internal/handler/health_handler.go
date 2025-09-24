@@ -6,7 +6,7 @@ import (
 	"github.com/gin-gonic/gin"
 	"github.com/sirupsen/logrus"
 
-	"github.com/textaudit/model-inference/internal/service"
+	"github.com/mj37yhyy/ai-demo/go-services/model-inference/internal/service"
 )
 
 // HealthHandler 健康检查处理器

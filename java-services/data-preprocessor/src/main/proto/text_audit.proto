@@ -1,0 +1,223 @@
+syntax = "proto3";
+
+package text_audit;
+
+option go_package = "github.com/text-audit/proto";
+option java_package = "com.textaudit.proto";
+option java_outer_classname = "TextAuditProto";
+
+// 原始文本数据
+message RawText {
+  string content = 1;      // 文本内容
+  string source = 2;       // 来源（如"豆瓣评论"）
+  int64 timestamp = 3;     // 采集时间戳（毫秒）
+  string id = 4;           // 唯一标识（UUID生成）
+  map<string, string> metadata = 5; // 元数据
+}
+
+// 预处理后的文本数据
+message ProcessedText {
+  string id = 1;           // 唯一标识
+  string content = 2;      // 清洗后的文本内容
+  repeated string tokens = 3; // 分词结果
+  repeated double features = 4; // TF-IDF特征向量
+  int32 label = 5;         // 标注标签（0=正常，1=违规）
+  string source = 6;       // 来源
+  int64 timestamp = 7;     // 处理时间戳
+  ProcessingMetadata processing_metadata = 8; // 处理元数据
+}
+
+// 处理元数据
+message ProcessingMetadata {
+  int32 original_length = 1;    // 原始文本长度
+  int32 cleaned_length = 2;     // 清洗后文本长度
+  int32 token_count = 3;        // 分词数量
+  repeated string removed_tokens = 4; // 被移除的停用词
+  double processing_time_ms = 5; // 处理耗时（毫秒）
+}
+
+// 审核请求
+message AuditRequest {
+  string text = 1;         // 待审核文本
+  string request_id = 2;   // 请求ID
+  AuditOptions options = 3; // 审核选项
+}
+
+// 审核选项
+message AuditOptions {
+  repeated string models = 1;    // 使用的模型列表
+  double threshold = 2;          // 违规阈值
+  bool return_features = 3;      // 是否返回特征
+  bool return_explanation = 4;   // 是否返回解释
+}
+
+// 审核响应
+message AuditResponse {
+  string request_id = 1;         // 请求ID
+  bool is_violation = 2;         // 是否违规
+  double confidence = 3;         // 置信度
+  ViolationType violation_type = 4; // 违规类型
+  repeated ModelResult model_results = 5; // 各模型结果
+  repeated double features = 6;   // 特征向量（可选）
+  string explanation = 7;        // 解释说明（可选）
+  int64 processing_time_ms = 8;  // 处理耗时
+}
+
+// 违规类型
+enum ViolationType {
+  NORMAL = 0;        // 正常
+  PORNOGRAPHY = 1;   // 色情
+  VIOLENCE = 2;      // 暴力
+  ADVERTISEMENT = 3; // 广告
+  SPAM = 4;          // 垃圾信息
+  HATE_SPEECH = 5;   // 仇恨言论
+  OTHER = 6;         // 其他
+}
+
+// 模型结果
+message ModelResult {
+  string model_name = 1;         // 模型名称
+  double score = 2;              // 得分
+  bool is_violation = 3;         // 是否违规
+  ViolationType violation_type = 4; // 违规类型
+  int64 inference_time_ms = 5;   // 推理耗时
+}
+
+// 批量审核请求
+message BatchAuditRequest {
+  repeated AuditRequest requests = 1;
+  string batch_id = 2;
+}
+
+// 批量审核响应
+message BatchAuditResponse {
+  string batch_id = 1;
+  repeated AuditResponse responses = 2;
+  int64 total_processing_time_ms = 3;
+}
+
+// 模型训练请求
+message TrainRequest {
+  string model_type = 1;         // 模型类型
+  TrainConfig config = 2;        // 训练配置
+  string dataset_path = 3;       // 数据集路径
+}
+
+// 训练配置
+message TrainConfig {
+  int32 epochs = 1;              // 训练轮数
+  double learning_rate = 2;      // 学习率
+  int32 batch_size = 3;          // 批次大小
+  double validation_split = 4;   // 验证集比例
+  map<string, string> hyperparameters = 5; // 超参数
+}
+
+// 训练响应
+message TrainResponse {
+  string model_id = 1;           // 模型ID
+  TrainStatus status = 2;        // 训练状态
+  TrainMetrics metrics = 3;      // 训练指标
+  string message = 4;            // 状态消息
+}
+
+// 训练状态
+enum TrainStatus {
+  TRAINING_PENDING = 0;    // 等待中
+  TRAINING_RUNNING = 1;    // 训练中
+  TRAINING_COMPLETED = 2;  // 已完成
+  TRAINING_FAILED = 3;     // 失败
+}
+
+// 训练指标
+message TrainMetrics {
+  double accuracy = 1;           // 准确率
+  double precision = 2;          // 精确率
+  double recall = 3;             // 召回率
+  double f1_score = 4;           // F1值
+  double loss = 5;               // 损失值
+  int32 epoch = 6;               // 当前轮数
+}
+
+// gRPC 服务定义
+service TextAuditService {
+  // 单个文本审核
+  rpc AuditText(AuditRequest) returns (AuditResponse);
+  
+  // 批量文本审核
+  rpc BatchAuditText(BatchAuditRequest) returns (BatchAuditResponse);
+  
+  // 模型训练
+  rpc TrainModel(TrainRequest) returns (TrainResponse);
+  
+  // 获取训练状态
+  rpc GetTrainStatus(TrainRequest) returns (TrainResponse);
+}
+
+// 数据采集服务
+service DataCollectionService {
+  // 采集文本数据
+  rpc CollectText(CollectRequest) returns (CollectResponse);
+  
+  // 获取采集状态
+  rpc GetCollectionStatus(StatusRequest) returns (StatusResponse);
+}
+
+// 采集请求
+message CollectRequest {
+  CollectionSource source = 1;   // 采集源
+  CollectionConfig config = 2;   // 采集配置
+}
+
+// 采集源
+message CollectionSource {
+  SourceType type = 1;           // 源类型
+  string url = 2;                // URL地址
+  string file_path = 3;          // 文件路径
+  map<string, string> parameters = 4; // 参数
+}
+
+// 源类型
+enum SourceType {
+  API = 0;          // API接口
+  WEB_CRAWLER = 1;  // 网页爬虫
+  LOCAL_FILE = 2;   // 本地文件
+}
+
+// 采集配置
+message CollectionConfig {
+  int32 max_count = 1;           // 最大采集数量
+  int32 concurrent_limit = 2;    // 并发限制
+  int32 rate_limit = 3;          // 速率限制（每秒）
+  repeated string filters = 4;   // 过滤规则
+}
+
+// 采集响应
+message CollectResponse {
+  string task_id = 1;            // 任务ID
+  CollectionStatus status = 2;   // 采集状态
+  int32 collected_count = 3;     // 已采集数量
+  string message = 4;            // 状态消息
+}
+
+// 采集状态
+enum CollectionStatus {
+  COLLECTION_PENDING = 0;   // 等待中
+  COLLECTION_RUNNING = 1;   // 采集中
+  COLLECTION_COMPLETED = 2; // 已完成
+  COLLECTION_FAILED = 3;    // 失败
+}
+
+// 状态请求
+message StatusRequest {
+  string task_id = 1;            // 任务ID
+}
+
+// 状态响应
+message StatusResponse {
+  string task_id = 1;            // 任务ID
+  CollectionStatus status = 2;   // 状态
+  int32 progress = 3;            // 进度百分比
+  string message = 4;            // 状态消息
+  int64 start_time = 5;          // 开始时间
+  int64 end_time = 6;            // 结束时间
+}

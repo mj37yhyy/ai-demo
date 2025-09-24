@@ -6,7 +6,7 @@ import (
 
 	"gorm.io/gorm"
 
-	"github.com/textaudit/model-inference/internal/model"
+	"github.com/mj37yhyy/ai-demo/go-services/model-inference/internal/model"
 )
 
 // InferenceRepository 推理仓库接口

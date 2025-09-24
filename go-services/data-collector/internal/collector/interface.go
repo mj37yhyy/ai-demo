@@ -3,7 +3,7 @@ package collector
 import (
 	"context"
 
-	pb "github.com/text-audit/data-collector/proto"
+	pb "github.com/mj37yhyy/ai-demo/go-services/data-collector/proto"
 )
 
 // Collector 定义了文本采集器的接口

@@ -7,8 +7,8 @@ import (
 	"github.com/gin-gonic/gin"
 	"github.com/sirupsen/logrus"
 
-	"github.com/textaudit/model-inference/internal/model"
-	"github.com/textaudit/model-inference/internal/service"
+	"github.com/mj37yhyy/ai-demo/go-services/model-inference/internal/model"
+	"github.com/mj37yhyy/ai-demo/go-services/model-inference/internal/service"
 )
 
 // InferenceHandler 推理处理器
@@ -120,7 +120,7 @@ func (h *InferenceHandler) TextClassify(c *gin.Context) {
 	}
 
 	// 执行文本分类
-	response, err := h.inferenceService.TextClassify(c.Request.Context(), &req)
+	response, err := h.inferenceService.ClassifyText(c.Request.Context(), &req)
 	if err != nil {
 		h.logger.WithError(err).WithField("model_name", req.ModelName).Error("文本分类失败")
 		c.JSON(http.StatusInternalServerError, model.ErrorResponse{
@@ -156,7 +156,7 @@ func (h *InferenceHandler) SentimentAnalysis(c *gin.Context) {
 	}
 
 	// 执行情感分析
-	response, err := h.inferenceService.SentimentAnalysis(c.Request.Context(), &req)
+	response, err := h.inferenceService.AnalyzeSentiment(c.Request.Context(), &req)
 	if err != nil {
 		h.logger.WithError(err).WithField("model_name", req.ModelName).Error("情感分析失败")
 		c.JSON(http.StatusInternalServerError, model.ErrorResponse{
@@ -192,7 +192,7 @@ func (h *InferenceHandler) FeatureExtraction(c *gin.Context) {
 	}
 
 	// 执行特征提取
-	response, err := h.inferenceService.FeatureExtraction(c.Request.Context(), &req)
+	response, err := h.inferenceService.ExtractFeatures(c.Request.Context(), &req)
 	if err != nil {
 		h.logger.WithError(err).WithField("model_name", req.ModelName).Error("特征提取失败")
 		c.JSON(http.StatusInternalServerError, model.ErrorResponse{
@@ -228,7 +228,7 @@ func (h *InferenceHandler) AnomalyDetection(c *gin.Context) {
 	}
 
 	// 执行异常检测
-	response, err := h.inferenceService.AnomalyDetection(c.Request.Context(), &req)
+	response, err := h.inferenceService.DetectAnomaly(c.Request.Context(), &req)
 	if err != nil {
 		h.logger.WithError(err).WithField("model_name", req.ModelName).Error("异常检测失败")
 		c.JSON(http.StatusInternalServerError, model.ErrorResponse{
@@ -259,8 +259,6 @@ func (h *InferenceHandler) GetInferenceHistory(c *gin.Context) {
 	// 解析查询参数
 	page, _ := strconv.Atoi(c.DefaultQuery("page", "1"))
 	limit, _ := strconv.Atoi(c.DefaultQuery("limit", "10"))
-	modelName := c.Query("model_name")
-	status := c.Query("status")
 
 	if page < 1 {
 		page = 1
@@ -269,8 +267,10 @@ func (h *InferenceHandler) GetInferenceHistory(c *gin.Context) {
 		limit = 10
 	}
 
+	offset := (page - 1) * limit
+
 	// 获取推理历史
-	history, err := h.inferenceService.GetInferenceHistory(c.Request.Context(), page, limit, modelName, status)
+	history, err := h.inferenceService.GetHistory(c.Request.Context(), limit, offset)
 	if err != nil {
 		h.logger.WithError(err).Error("获取推理历史失败")
 		c.JSON(http.StatusInternalServerError, model.ErrorResponse{
@@ -330,7 +330,7 @@ func (h *InferenceHandler) GetInferenceResult(c *gin.Context) {
 // @Router /api/v1/inference/statistics [get]
 func (h *InferenceHandler) GetInferenceStatistics(c *gin.Context) {
 	// 获取推理统计信息
-	stats, err := h.inferenceService.GetInferenceStatistics(c.Request.Context())
+	stats, err := h.inferenceService.GetStatistics(c.Request.Context())
 	if err != nil {
 		h.logger.WithError(err).Error("获取推理统计信息失败")
 		c.JSON(http.StatusInternalServerError, model.ErrorResponse{
