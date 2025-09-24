@@ -1,0 +1,46 @@
+global:
+  scrape_interval: 15s
+  evaluation_interval: 15s
+
+rule_files:
+  # - "first_rules.yml"
+  # - "second_rules.yml"
+
+scrape_configs:
+  - job_name: 'prometheus'
+    static_configs:
+      - targets: ['localhost:9090']
+
+  - job_name: 'data-collector'
+    static_configs:
+      - targets: ['data-collector:8081']
+    metrics_path: '/metrics'
+    scrape_interval: 30s
+
+  - job_name: 'data-preprocessor'
+    static_configs:
+      - targets: ['data-preprocessor:8082']
+    metrics_path: '/actuator/prometheus'
+    scrape_interval: 30s
+
+  - job_name: 'model-trainer'
+    static_configs:
+      - targets: ['model-trainer:8084']
+    metrics_path: '/actuator/prometheus'
+    scrape_interval: 30s
+
+  - job_name: 'model-inference'
+    static_configs:
+      - targets: ['model-inference:8083']
+    metrics_path: '/metrics'
+    scrape_interval: 30s
+
+  - job_name: 'mysql'
+    static_configs:
+      - targets: ['mysql:3306']
+    scrape_interval: 60s
+
+  - job_name: 'redis'
+    static_configs:
+      - targets: ['redis:6379']
+    scrape_interval: 60s
